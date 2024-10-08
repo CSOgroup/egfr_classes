@@ -1,9 +1,13 @@
 
+### sourcing helper and analysis functions
 source("/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_utils.R")
 source( "/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_functions.R" )
 
-# < 1.0.2_preprocessing_EGFRclasses.R > 
-# < 1.1.1_preprocessing_EGFRcuc_assignment_UsingAlphaMissense.R >
+### constructing EGFR mutation list
+source("/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_MutationListConstruction.R")
+
+### Preprocessing clinical data
+source("/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_Preprocessing.R")
 
 load(file = "/mnt/ndata/daniele/alfredo_egfr/Processed/EGFR_classes/ec_exons18_21_oncogenic_alphamissense_filtered.RData" ) # new version, including china
 
