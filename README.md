@@ -2,7 +2,9 @@
 
 Repository containing the scripts for the analyses in the manuscript _Decoding the Clinical and Molecular Signatures of EGFR Common, Compound, and Uncommon Mutations in Non-Small Cell Lung Cancer_
 
-__EGFRclasses_MutationListConstruction.R__:
+All the steps are performed following __EGFRclasses_pipeline.R__. The clinical and molecular data for the various datasets was retreived from the sources cited in the manuscript. 
+
+__EGFRclasses_MutationListConstruction_step1.R__, __EGFRclasses_MutationListConstruction_step2.R__:
 Construction of the list of EGFR mutations, assignment to the classes, filtering.
 
 __EGFRclasses_Preprocessing.R__:

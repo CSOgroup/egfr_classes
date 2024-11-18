@@ -2,8 +2,8 @@
 source("/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_utils.R")
 CommonDataDir = "/mnt/ed2/daniele/Common_Data/"
 DataDir = "/mnt/ndata/daniele/alfredo_egfr/Data/"
-dir.create(DataDir)
-OutDir = "/mnt/ndata/daniele/alfredo_egfr/Data/using_AlphaMissense/"
+MainDir = "/mnt/ndata/daniele/alfredo_egfr/Processed/EGFRclasses_pipeline/Repro/"
+OutDir = paste0(MainDir,"Raw_clinical_formatting/")
 dir.create(OutDir)
 ordered_classes = c( "common","uncommon","compound","T790M","ex20ins" )
 colorz_classes = c("steelblue4","tomato3","mediumpurple4","darksalmon","orange2")
@@ -14,8 +14,7 @@ colorz_classes = c("steelblue4","tomato3","mediumpurple4","darksalmon","orange2"
 
 #################### Main #####################
 
-# load(file = paste0( DataDir,"ec_exons18_21_oncogenic_alphamissense_filtered.RData" ) )
-load(file = "/mnt/ndata/daniele/alfredo_egfr/Processed/EGFR_classes/ec_exons18_21_oncogenic_alphamissense_filtered.RData" ) # new version, including china
+load(file = paste0(MainDir,"EGFR_classes/","ec_exons18_21_oncogenic_alphamissense_filtered.RData") ) # new version, including data from china
 
 mutdf = dan.df(0,c("EGFR_status","Dataset","Count","Percentage" ))
 scdf = dan.df(0,c("EGFR_class","Dataset","Count","Percentage" ))
@@ -335,8 +334,8 @@ save(Clin2, file = paste0( OutDir,"Clin2_Genie_SampleLevel.RData" ))
 ## Relationship between sample-level and patient-level
 load(file = paste0( OutDir,"Clin_Genie.RData" ))
 load(file = paste0( OutDir,"Clin2_Genie_SampleLevel.RData" ))
-load(file = paste0( "/mnt/ndata/daniele/alfredo_egfr/Data/using_AlphaMissense/","Clin_Genie_complete.RData" ))
-load(file = paste0( "/mnt/ndata/daniele/alfredo_egfr/Data/using_AlphaMissense/","Clin2_Genie_SampleLevel_complete.RData" ))
+load(file = paste0( OutDir,"Clin_Genie_complete.RData" ))
+load(file = paste0( OutDir,"Clin2_Genie_SampleLevel_complete.RData" ))
 all(Clin$Patient %in% Clin2$Patient)
 all(Clin2$Patient %in% Clin$Patient)
 for (rn in rownames(Clin2)){

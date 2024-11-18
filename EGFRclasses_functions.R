@@ -3,7 +3,7 @@ library(reshape2)
 library(ggpubr)
 library(limma)
 library(edgeR)
-source("/mnt/ndata/daniele/lung_multiregion/sc/cell-state-inference/utils/dan.functions.R")
+source("/mnt/ndata/daniele/alfredo_egfr/Scripts/EGFRclasses_utils.R")
 DataDir = "/mnt/ndata/daniele/alfredo_egfr/Data/"
 CommonDataDir = "/mnt/ed2/daniele/Common_Data/"
 ordered_classes = c( "common_ex19del","common_L858R", "common","uncommon","compound","T790M","ex20ins" )
@@ -11,56 +11,9 @@ colorz_classes = c("deepskyblue4","deepskyblue3","steelblue4","tomato3","mediump
 clco = data.frame(row.names = ordered_classes, classes = ordered_classes, colorz = colorz_classes)
 size_labels = 6/.pt
 
-compare_borgeaud_robichaux = function( OutDir ){
-	load(file = "/mnt/ndata/daniele/alfredo_egfr/Processed/EGFR_classes/ec_exons18_21_oncogenic_alphamissense_filtered.RData" ) # new version, including china
-	ec = ec[ec$Class %in% c( "common","uncommon" ),]
-	ec = ec[substr(ec$Mutation,1,2)=="p.",] # exclude c. mutations of TRACERx
-	ec$Mutation = substr(ec$Mutation,3,nchar(ec$Mutation))
-	ec = ec[!duplicated(ec$Mutation),]
-	library(eulerr)
-	# read robichaux TableS4
-	er = dan.read(paste0(DataDir,"Robi_mutations_tableS4.txt"))
-	er = er[!grepl(",",er$mutations),]
-	er = er[er$four_classes %in% c("classical-like","PACC"),]
-	# common vs classical/PACC
-	# er also contains also ex19del. Let's include them directly from ec, and remove the duplicates
-	er = rbind(er, data.frame( four_classes="classical-like",six_classes="classical-like",mutations=ec[ec$Class=="common","Mutation"],stringsAsFactors=F ))
-	er = er[!duplicated(er$mutations),]
-	er = er[!(er$mutations=="Ex19del"),]
-	classical = sum(er$four_classes=="classical-like")
-	pacc = sum(er$four_classes=="PACC")
-	common = sum(ec$Class=="common")
-	uncommon = sum(ec$Class=="uncommon")
-	classical_pacc = 0
-	classical_common = length(intersect(er[er$four_classes=="classical-like","mutations"],ec[ec$Class=="common","Mutation"]))
-	pacc_common = length(intersect(er[er$four_classes=="PACC","mutations"],ec[ec$Class=="common","Mutation"]))
-	classical_uncommon = length(intersect(er[er$four_classes=="classical-like","mutations"],ec[ec$Class=="uncommon","Mutation"]))
-	pacc_uncommon = length(intersect(er[er$four_classes=="PACC","mutations"],ec[ec$Class=="uncommon","Mutation"]))
-	fit1 <- euler(c("A"=classical-classical_common,"B"=common-classical_common-pacc_common,"C"=pacc-pacc_common,"A&B"=classical_common,"A&C"=0,"B&C"=pacc_common,"A&B&C"=0))
-	pdf(paste0(OutDir,"borgeaud_vs_robichaux_common.pdf"),2.5,2.5, useDingbats=F,onefile=F,pointsize=6)
-	plot(fit1,labels = c("Classical-like","common","PACC"),fills = c("pink1","steelblue4","dodgerblue3"),edges = FALSE,fontsize=6,quantities = list(fontsize = 6))
-	dev.off()
-
-	# uncommon vs classical/PACC
-	fit1 <- euler(c("A"=classical-classical_uncommon,"B"=common-classical_uncommon-pacc_uncommon,"C"=pacc-pacc_uncommon,"A&B"=classical_uncommon,"A&C"=0,"B&C"=pacc_uncommon,"A&B&C"=0))
-	pdf(paste0(OutDir,"borgeaud_vs_robichaux_uncommon.pdf"),2.5,2.5, useDingbats=F,onefile=F,pointsize=6)
-	plot(fit1,labels = c("Classical-like","uncommon","PACC"),fills = c("pink1","tomato3","dodgerblue3"),edges = FALSE,fontsize=6,quantities = list(fontsize = 6))
-	dev.off()
-	
-	xvenn = list(Robichaux_et_al_2021=pr[(xpval<cutoff_fdr) & (x>0),"gene"],Borgeaud_et_al_2024=pr[(ypval<cutoff_fdr) & (y>0),"gene"])
-	pdf(paste0(OutDir,"ATG3OE_vs_ATG7OE_up_venn.pdf"),7,7)
-	ggvenn( xvenn,fill_color = c("darkorange1", "goldenrod"),stroke_size = 0.5,show_elements=F, set_name_size = 4,label_sep='\n', text_size=3)
-	dev.off()
-}
-
-patients_assignment = function( OutDir, retain, using_AlphaMissense = TRUE, split_common = FALSE, compound_to_uncommon = FALSE ){
+patients_assignment = function( OutDir, retain, formatted_clinical_folder, split_common = FALSE, compound_to_uncommon = FALSE ){
 	for (dataset in c( "TCGA","Chen","Genie","Zhang","TRACERx421","Origimed" ) ){
-		if ( using_AlphaMissense ){
-			load(file = paste0( DataDir,"using_AlphaMissense/Clin_",dataset,"_complete.RData" ))
-		} else {
-			load(file = paste0( DataDir,"Clin_",dataset,"_complete.RData" ))	
-		}
-		
+		load(file = paste0( formatted_clinical_folder,"Clin_",dataset,"_complete.RData" ))
 		Clin = Clin[Clin$egfr_class_consensus %in% retain,]
 		if (split_common){
 			double_commons = Clin[(Clin$egfr_class_consensus=="common") & ((Clin$egfr_class_2=="common") %in% c(T) ),]
@@ -72,11 +25,7 @@ patients_assignment = function( OutDir, retain, using_AlphaMissense = TRUE, spli
 			Clin[Clin$egfr_class_consensus=="compound","egfr_class_consensus"] = "uncommon"
 		}
 		save(Clin, file = paste0( OutDir,"Clin_",dataset,".RData" ))
-		if ( using_AlphaMissense ){
-			load(file = paste0( DataDir,"using_AlphaMissense/Clin2_",dataset,"_SampleLevel_complete.RData" ))
-		} else {
-			load(file = paste0( DataDir,"Clin2_",dataset,"_SampleLevel_complete.RData" ))
-		}
+		load(file = paste0( formatted_clinical_folder,"Clin2_",dataset,"_SampleLevel_complete.RData" ))
 		Clin2 = Clin2[Clin2$egfr_class_consensus %in% retain,]
 		if (split_common){
 			double_commons = Clin2[(Clin2$egfr_class_consensus=="common") & ((Clin2$egfr_class_2=="common") %in% c(T) ),]
@@ -523,6 +472,7 @@ clinical_associations = function( OutDir ){
 
 	Clinall = rbind(rbind(rbind(Cling,Clint),rbind(Clinc,Clinx) ),Clinz)
 	Clinall = rbind(Clinall,Clino)
+	save(Clinall, file = paste0( OutDir,"Clinall.RData" ))
 
 	dcat( "All datasets" )
 	fisher_tests( Clinall, c( "Stage","Sex","Race","Smoking","Pattern" ) )
@@ -1275,29 +1225,6 @@ clinical_associations = function( OutDir ){
 	dev.off()
 }
 
-tracerx_analyses = function( OutDir ){
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TRACERx421.RData" ))
-	em = dan.read(paste0(DataDir,"TRACERx_421/transcriptomics_scripts_data_updated/20221014_transcriptomic_DATA/20221110_TRACERx421_evolutionary_metrics.tsv")) # contains loooots of metrics - can be used
-	rownames(em) = em$tumour_id
-	varz = c( "clonal_mixing_index","num_branches","branching_index","perc_subclonal","TMB","num_subclones","wGII","wFLOH","ploidy","purity","genom_frac_clonal_event","genom_frac_subclonal_event", "genom_frac_event","SBS4_clonal","SBS4_subclonal","mean_smoking_sig","mean_apobec_sig")
-	Clin = cbind(Clin,em[rownames(Clin),varz])
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	colorz_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"colorz"]
-	ordered_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"classes"]
-	pdf(paste0(OutDir,"TRACERx421_evo_metrics.pdf"),6,5)
-	for (ct in varz){
-		x = factor(Clin$egfr_class_consensus,levels=ordered_classes)
-		y = as.numeric(Clin[,ct])
-	  	plot=dan.boxplots.multipages(x=x,y=y,signifTest="kruskal",xlab="",labelycoo = max(y,na.rm=T)+0.01,ylab=ct,xColors = colorz_classes, jitterColors = Clin$colorz,includeJitters = T)
-	  	print(plot)
-	}
-	dev.off()
-}
-
 mutations_associations_alldatasets = function( OutDir ){
 
 	hotspots = dan.read(paste0(DataDir,"hotspots_mskcc_chang2016.txt"))
@@ -1639,278 +1566,6 @@ mutations_associations_alldatasets = function( OutDir ){
 }
 
 mutations_associations_accounting_for_TMB = function( OutDir, nbins = 8 ){
-	# # computing coverage for each Genie assay (bedtools)
-	# gi = dan.read(paste0(DataDir,"genie_14.0/genomic_information.txt"))
-	# dir.create(paste0(DataDir,"genie_14.0/assays_coverages/"))
-	# for (assay in unique(gi$SEQ_ASSAY_ID)){
-	# 	gia = gi[ gi$SEQ_ASSAY_ID==assay,]
-	# 	# removing duplicated entries
-	# 	gia = gia[!duplicated( paste0(gia$Chromosome,"_",gia$Start_Position,"_",gia$End_Position )),c("Chromosome","Start_Position","End_Position")]
-	# 	gia = gia[order(gia$Chromosome,gia$Start_Position),]
-	# 	write.table(gia, file = paste0(DataDir,"genie_14.0/assays_coverages/assay_",assay,".bed"), row.names = F, col.names = F, sep = "\t", quote = F)
-	# }
-	# ### execute in bash
-	# # cd "/mnt/ndata/daniele/alfredo_egfr/Data/genie_14.0/assays_coverages/"
-	# # for file in assay_*.bed
-	# # do
-	# #     /mnt/ndata/daniele/lung_multiregion/Scripts/Tools/bedtools2/bin/mergeBed -i $file > $file"_merged.txt"
-	# # done
-	# assay_coverages = data.frame(row.names=unique(gi$SEQ_ASSAY_ID), assay=unique(gi$SEQ_ASSAY_ID), coverage = NA, stringsAsFactors=F)
-	# for (assay in unique(gi$SEQ_ASSAY_ID)){
-	# 	cov = read.table(file = paste0(DataDir,"genie_14.0/assays_coverages/assay_",assay,".bed_merged.txt"), header = F, sep = "\t", quote = '',stringsAsFactors=F)
-	# 	assay_coverages[assay,"coverage"] = sum(cov$V3-cov$V2+1)
-	# }
-	# assay_coverages[order(assay_coverages$coverage,decreasing=T),]
-	# # the "WAKE" assays have gene intervals of 1bp. excluding them
-	# assay_coverages[assay_coverages$coverage<10000,"coverage"] = NA
-	# # estimate TMB for Genie from Nmut and assay coverages. Compare with the reported one (available for much fewer cases)
-	# ### I tried, but TMB estimated in this way varies too much. It is possible that the assay coverages are not real.
-
-	# ### Doing the same analysis but on synonymous variants
-	# genez = dan.read(paste0( DataDir,"mina_natgen_2020_genes.txt" ))
-	# rownames(genez) = genez$gene
-	# ###### Genie
-	# dcat( "Processing Genie",1 )
-	# ###### Genie
-	# gi = dan.read(paste0(DataDir,"genie_14.0/genomic_information.txt"))
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_Genie.RData" ))
-	# Cling = Clin
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin2_Genie_SampleLevel.RData" ))
-	# Clin2g = Clin2
-	# colorz_classes = clco[rownames(clco) %in% (Clin2g$egfr_class_consensus),"colorz"]
-	# ordered_classes = clco[rownames(clco) %in% (Clin2g$egfr_class_consensus),"classes"]	
-	# load(file = paste0(DataDir,'genie_14.0/maf_Genie_LUAD_all.RData'))
-	# gene_universe = unique(maf_ss$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"Genie_gene_universe.RData" ))
-	# maf_ss$Sample = maf_ss$Tumor_Sample_Barcode
-	# maf_ss = maf_ss[maf_ss$Sample %in% Clin2$Sample,]
-	# maf_ss$Patient = Clin2[maf_ss$Tumor_Sample_Barcode,"Patient"]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf_ss[(maf_ss$Variant_Classification %in% c("Silent","3'Flank","3'UTR","5'Flank","5'UTR","Intron")),]
-	# tClin2 = Clin2g
-	# tclin = Cling
-	# tclin = Cling[rownames(Cling) %in% tClin2$Patient,]
-	# tmaf = maf_ss[(maf_ss$Patient %in% tclin$Patient),]
-	# gam = dan.df(these_patients,rownames(genez), data=NA)
-	# assays = sort(unique(Clin2g$SEQ_ASSAY_ID))
-	# for (a in assays){
-	# 	gia = gi[gi$SEQ_ASSAY_ID==a,]
-	# 	ug = intersect(unique(gia$Hugo_Symbol[nchar(gia$Hugo_Symbol)>0]),colnames(gam))
-	# 	patients = intersect(unique(tClin2[Clin2g$SEQ_ASSAY_ID==a,"Patient"]),rownames(gam))
-	# 	gam[patients,ug] = 0
-	# }
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "Genie"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = gam
-	# clinAll = tclin
-
-	# dcat( "Processing TCGA",1 )
-	# ###### TCGA
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	# Clint = Clin
-	# load(paste0(CommonDataDir,'maf_LUAD_all.RData'))
-	# gene_universe = unique(maf_ss$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"TCGA_gene_universe.RData" ))
-	# maf_ss$Patient = substr(maf_ss$Tumor_Sample_Barcode,1,12)
-	# maf_ss$Sample = substr(maf_ss$Tumor_Sample_Barcode,1,16)
-	# tclin = Clint[Clint$Patient %in% maf_ss$Patient,]
-	# maf_ss = maf_ss[maf_ss$Patient %in% tclin$Patient,]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf_ss[maf_ss$Variant_Classification %in% c("Silent","3'Flank","3'UTR","5'Flank","5'UTR","Intron"),]
-	# tmaf = maf_ss[!duplicated(paste0(maf_ss$Hugo_Symbol, maf_ss$Patient, maf_ss$HGVSp_Short)),]
-	# gam = dan.df(these_patients,intersect(gene_universe,rownames(genez)), data=0)
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "TCGA"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = rbind(gamAll[,intersect(colnames(gamAll),colnames(gam))],gam[,intersect(colnames(gamAll),colnames(gam))])
-	# clinAll = rbind(clinAll[,intersect(colnames(clinAll),colnames(tclin))], tclin[,intersect(colnames(clinAll),colnames(tclin))])
-
-	# dcat( "Processing ChenEAS",1 )
-	# ###### ChenEAS
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_Chen.RData" ))
-	# Clinc = Clin
-	# maf = dan.read(file = paste0("/mnt/ndata/daniele/lung_multiregion/Data/Chen2020/snv_indel.maf"))
-	# gene_universe = unique(maf$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"ChenEAS_gene_universe.RData" ))
-	# maf$Patient = maf$Tumor_Sample_Barcode
-	# maf_ss = maf
-	# tclin = Clinc[Clinc$Patient %in% maf_ss$Patient,]
-	# maf_ss = maf_ss[maf_ss$Patient %in% tclin$Patient,]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf[(maf$Variant_Classification %in% c("silent mutation","3'Flank","3'UTR","5'Flank","5'UTR","Intron")),]
-	# tmaf = maf_ss[!duplicated(paste0(maf_ss$Hugo_Symbol, maf_ss$Patient, maf_ss$HGVSp_Short)),]
-	# gam = dan.df(unique(tmaf$Patient),intersect(gene_universe,rownames(genez)), data=0)
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "ChenEAS"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = rbind(gamAll[,intersect(colnames(gamAll),colnames(gam))],gam[,intersect(colnames(gamAll),colnames(gam))])
-	# clinAll = rbind(clinAll[,intersect(colnames(clinAll),colnames(tclin))], tclin[,intersect(colnames(clinAll),colnames(tclin))])
-
-	# dcat( "Processing Zhang",1 )
-	# ###### Zhang
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_Zhang.RData" ))
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin2_Zhang_SampleLevel.RData" ))
-	# Clinz = Clin
-	# Clin2z = Clin2
-	# maf = dan.read(paste0(DataDir,"lung_cancer_never_smokers_nci_2022/data_mutations.txt"))
-	# gene_universe = unique(maf$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"Zhang_gene_universe.RData" ))
-	# maf_ss = maf[maf$Tumor_Sample_Barcode %in% Clin2$Sample,]
-	# maf_ss$Sample = maf_ss$Tumor_Sample_Barcode
-	# maf_ss$Patient = Clin2[maf_ss$Tumor_Sample_Barcode,"Patient"]
-	# tclin = Clinz[Clinz$Patient %in% maf_ss$Patient,]
-	# maf_ss = maf_ss[maf_ss$Patient %in% tclin$Patient,]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf_ss[maf_ss$Variant_Classification %in% c("Silent","Intron","5'UTR","3'UTR","5'Flank","3'Flank"),]
-	# tmaf = maf_ss[!duplicated(paste0(maf_ss$Hugo_Symbol, maf_ss$Patient, maf_ss$HGVSp_Short)),]
-	# gam = dan.df(these_patients,intersect(gene_universe,rownames(genez)), data=0)
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "Zhang"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = rbind(gamAll[,intersect(colnames(gamAll),colnames(gam))],gam[,intersect(colnames(gamAll),colnames(gam))])
-	# clinAll = rbind(clinAll[,intersect(colnames(clinAll),colnames(tclin))], tclin[,intersect(colnames(clinAll),colnames(tclin))])
-
-	# dcat( "Processing TRACERx421",1 )
-	# ###### TRACERx421
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_TRACERx421.RData" ))
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin2_TRACERx421_SampleLevel.RData" ))
-	# Clinz = Clin
-	# Clin2z = Clin2
-	# library(fst)
-	# maf = read_fst(paste0(DataDir,"TRACERx_421/figurecode/data/20221109_TRACERx421_mutation_table.fst"))
-	# gene_universe = unique(maf$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"TRACERx421_gene_universe.RData" ))
-	# maf_ss = maf[maf$tumour_id %in% Clin2$Sample,]
-	# maf_ss$Sample = maf_ss$tumour_id
-	# maf_ss$Patient = maf_ss$patient_id
-	# tclin = Clinz[Clinz$Patient %in% maf_ss$Patient,]
-	# maf_ss = maf_ss[maf_ss$Patient %in% tclin$Patient,]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf_ss[((maf_ss$exonic.func %in% c("synonymous SNV")) %in% c(T)),]
-	# maf_ss$mut = maf_ss$AAChange
-	# maf_ss[is.na(maf_ss$mut),"mut"] = paste0("p.",maf_ss[is.na(maf_ss$mut),"ref"],maf_ss[is.na(maf_ss$mut),"start"],maf_ss[is.na(maf_ss$mut),"var"])
-	# tmaf = maf_ss[!duplicated(paste0(maf_ss$Hugo_Symbol, maf_ss$Patient, maf_ss$mut)),]
-	# gam = dan.df(these_patients,intersect(gene_universe,rownames(genez)), data=0)
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "TRACERx421"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = rbind(gamAll[,intersect(colnames(gamAll),colnames(gam))],gam[,intersect(colnames(gamAll),colnames(gam))])
-	# clinAll = rbind(clinAll[,intersect(colnames(clinAll),colnames(tclin))], tclin[,intersect(colnames(clinAll),colnames(tclin))])
-
-	# ###### Origimed
-	# dcat( "Processing Origimed",1 )
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_Origimed.RData" ))
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin2_Origimed_SampleLevel.RData" ))
-	# Clinz = Clin
-	# Clin2z = Clin2
-	# colorz_classes = clco[rownames(clco) %in% (Clin2z$egfr_class_consensus),"colorz"]
-	# ordered_classes = clco[rownames(clco) %in% (Clin2z$egfr_class_consensus),"classes"]
-	# maf = dan.read(paste0(DataDir,"china_pan_origimed_2020/data_mutations_extended.txt"))
-	# gene_universe = unique(maf$Hugo_Symbol)
-	# save(gene_universe, file = paste0( OutDir,"Origimed_gene_universe.RData" ))
-	# maf_ss = maf[maf$Tumor_Sample_Barcode %in% Clin2$Sample,]
-	# maf_ss$Sample = maf_ss$Tumor_Sample_Barcode
-	# rownames(Clin2) = Clin2$Sample
-	# maf_ss$Patient = Clin2[maf_ss$Tumor_Sample_Barcode,"Patient"]
-	# tclin = Clinz[Clinz$Patient %in% maf_ss$Patient,]
-	# maf_ss = maf_ss[maf_ss$Patient %in% tclin$Patient,]
-	# these_patients = unique(maf_ss$Patient)
-	# maf_ss = maf_ss[maf_ss$Variant_Classification %in% c("Silent","3'Flank","3'UTR","5'Flank","5'UTR","Intron"),]
-	# tmaf = maf_ss[!duplicated(paste0(maf_ss$Hugo_Symbol, maf_ss$Patient, maf_ss$HGVSp_Short)),]
-	# gam = dan.df(these_patients,intersect(gene_universe,rownames(genez)), data=0)
-	# for (cn in colnames(gam)){
-	# 	ttmaf = tmaf[(tmaf$Hugo_Symbol==cn),]
-	# 	if (nrow(ttmaf)==0){ next }
-	# 	gam[unique(ttmaf$Patient),cn] = 1
-	# }
-	# tclin$Dataset = "Origimed"
-	# gam = cbind(gam,dan.df(rownames(gam),rownames(genez)[!(rownames(genez) %in% colnames(gam))],NA ))
-	# gamAll = rbind(gamAll[,intersect(colnames(gamAll),colnames(gam))],gam[,intersect(colnames(gamAll),colnames(gam))])
-	# clinAll = rbind(clinAll[,intersect(colnames(clinAll),colnames(tclin))], tclin[,intersect(colnames(clinAll),colnames(tclin))])
-
-	# gamAll = gamAll[,colnames(gamAll)!="EGFR"]
-	# gamAll = gamAll[rownames(clinAll),]
-	# tclin = clinAll
-	# all(rownames(gamAll) %in% rownames(tclin))
-	# gamAll = gamAll[,colSums(gamAll,na.rm=T)>=3]
-	# tclin = tclin[rownames(gamAll),]
-	# cdf = dan.df(0,c( "Gene","EGFR_class","nMut","Percentage","Chisq_pval","winner" ))
-	# for (g in colnames(gamAll)){
-	# 	this_tclin = tclin
-	# 	this_tclin$this_gene = gamAll[,g]
-	# 	this_tclin = this_tclin[!is.na(this_tclin$this_gene),]
-	# 	this_tclin[this_tclin$this_gene==0,"this_gene"] = "wt"
-	# 	this_tclin[this_tclin$this_gene==1,"this_gene"] = "mut"
-	# 	this_tclin$this_gene = factor(this_tclin$this_gene,levels=c("mut","wt"))
-	# 	this_tclin$egfr_class_consensus = factor(this_tclin$egfr_class_consensus,levels=ordered_classes)
-	# 	tabb = table(this_tclin$this_gene,this_tclin$egfr_class_consensus)
-	# 	ch = chisq.test(tabb)$p.value
-	# 	tcdf = data.frame(row.names = ordered_classes, Gene=rep(g,length(ordered_classes) ),EGFR_class=ordered_classes,Percentage=NA,Chisq_pval=NA,winner="no",stringsAsFactors=F)
-	# 	for (cl in ordered_classes){ tcdf[cl,"nMut"] = tabb["mut",cl] }
-	# 	for (cl in ordered_classes){ tcdf[cl,"Percentage"] = 100*tabb["mut",cl]/sum(tabb[,cl]) }
-	# 	tcdf[which.max( tcdf$Percentage),"winner"] = "yes"
-	# 	tcdf[tcdf$winner=="yes","Chisq_pval"] = ch
-	# 	cdf = rbind(cdf,tcdf)
-	# }
-	# cdf$Chisq_qval = NA
-	# cdf[cdf$winner=="yes","Chisq_qval"] = p.adjust(cdf[cdf$winner=="yes","Chisq_pval"],method="BH")
-	# cdf$EGFR_class = factor(cdf$EGFR_class, levels = ordered_classes)
-	# aa=cdf[order(cdf$Chisq_pval),]
-	# cdf_signif_genes = unique(cdf[(cdf$Chisq_qval<0.1) %in% c(T),"Gene"])
-	# scdf = cdf[cdf$Gene %in% cdf_signif_genes,]
-	# dcat( paste0("Uncommon percentage: ", 100*sum(scdf[(scdf$winner=="yes"),"EGFR_class"]=="uncommon")/nrow(scdf[(scdf$winner=="yes"),]) ))
-
-	# tcdf = cdf[cdf$Gene=="TP53",]
-	# tcdf$Chisq_pval = signif(tcdf$Chisq_pval,2)
-	# tcdf$Chisq_pval[!is.na(tcdf$Chisq_pval)] = paste0("Chi-square p-value = ",tcdf$Chisq_pval[!is.na(tcdf$Chisq_pval)])
-	# pdf(paste0( OutDir,"EGFRclasses_vs_TP53mutant_AllDatasets_SynOnly.pdf" ),5,5)
-	# pl = ggplot(data=tcdf, aes(x=Gene, y=Percentage, fill=EGFR_class)) + geom_bar(stat="identity", position=position_dodge(),colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\nTP53-mutant patients = ",sum(tcdf$nMut)," out of ",sum(!is.na(gamAll$TP53))) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) + geom_text(aes(label=Chisq_pval,y=Percentage),vjust=-0.2) + geom_text(aes(label=round(Percentage,1)), size = size_labels, vjust = 1.5, position = position_dodge(.9))
-	# print(pl)
-	# dev.off()
-
-	# tcdf = cdf[cdf$Gene=="KRAS",]
-	# tcdf$Chisq_pval = signif(tcdf$Chisq_pval,2)
-	# tcdf$Chisq_pval[!is.na(tcdf$Chisq_pval)] = paste0("Chi-square p-value = ",tcdf$Chisq_pval[!is.na(tcdf$Chisq_pval)])
-	# pdf(paste0( OutDir,"EGFRclasses_vs_KRASmutant_AllDatasets_SynOnly.pdf" ),5,5)
-	# pl = ggplot(data=tcdf, aes(x=Gene, y=Percentage, fill=EGFR_class)) + geom_bar(stat="identity", position=position_dodge(),colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\nTP53-mutant patients = ",sum(tcdf$nMut)," out of ",sum(!is.na(gamAll$KRAS))) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) + geom_text(aes(label=Chisq_pval,y=Percentage),vjust=-0.2) + geom_text(aes(label=round(Percentage,1)), size = size_labels, vjust = 1.5, position = position_dodge(.9))
-	# print(pl)
-	# dev.off()
-
-	# cdf = cdf[order(cdf$Chisq_pval),]
-	# genes_keep = cdf[1:20,"Gene"]
-	# cdf = cdf[cdf$Gene %in% genes_keep,]
-	# cdf$Gene = factor(cdf$Gene, levels = unique(cdf$Gene))
-	# cdf$Chisq_pval = signif(cdf$Chisq_pval,2)
-	# cdf[order(cdf$Gene),]
-
-	# pdf(paste0( OutDir,"AllDatasets_comutated_barplot_top20_SynOnly.pdf" ),nrow(cdf)/3,6)
-	# pl = ggplot(data=cdf, aes(x=Gene, y=Percentage, fill=EGFR_class)) + geom_bar(stat="identity", position=position_dodge(),colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Co-mutated genes, Chi-square test adjusted p-values (top 20 shown)") ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) + geom_text(aes(label=Chisq_pval,y=Percentage),vjust=-0.2) + geom_text(aes(label=round(Percentage,1)), size = size_labels, vjust = 1.5, position = position_dodge(.9))
-	# print(pl)
-	# dev.off()
-
-	# save(gamAll,file=paste0( OutDir,"gamAll_SynOnly.RData" ))
-	# save(tclin,file=paste0( OutDir,"tclin_gamAll_SynOnly.RData" ))
 
 	load(file = paste0( OutDir,"../Preprocessing/","Clin2_Genie_SampleLevel.RData" ))
 	Clin2g = Clin2
@@ -2423,22 +2078,6 @@ kras_further_analyses = function( OutDir ){
 	plotTitle = paste0( "Spearman R = ",signif(cor(thiz_kras_common$KRAS_vaf,thiz_kras_common$EGFR_vaf,method='spearman'),2),", p-value = ",signif(cor.test(thiz_kras_common$KRAS_vaf,thiz_kras_common$EGFR_vaf,method='spearman')$p.value,2) )
 	dan.scatterplot(paste0(OutDir,"vaf_EGFR_KRAS_matched_scatterplot_uncommon.pdf"),x=thiz_kras_common$KRAS_vaf,xlab='mean KRAS mutation VAF',ylab='mean EGFR mutation VAF',y=thiz_kras_common$EGFR_vaf,fill=thiz_kras_common$egfr_class_consensus,filllab="EGFR mutation class",fillColors=c("tomato3"),plotTitle=plotTitle,plotFitLine=T,FitLineColor='gray22',fileWidth=2.5,fileHeight=2,coord_fixed=T )
 
-
-	### did they arise post-treatment?
-	load(file=paste0( OutDir,"../Preprocessing/tcAll_vafs.RData" ))
-	load(file=paste0( OutDir,"tmaf_kras.RData" ))
-	load(file=paste0( OutDir,"tclin_gamAll.RData" ))
-	for (p in tmaf_kras$Patient){
-		tmaf_kras[tmaf_kras$Patient==p,"egfr_class_consensus"] = tclin[p,"egfr_class_consensus"]
-		tmaf_kras[tmaf_kras$Patient==p,"Dataset"] = tclin[p,"Dataset"]
-	}
-	ordered_classes = clco[rownames(clco) %in% (tmaf_kras$egfr_class_consensus),"classes"]
-
-	Clin = dan.read(paste0(DataDir,"china_pan_origimed_2020/data_clinical_patient.txt"))
-	Clin = Clin[Clin$PATIENT_ID %in% tmaf_kras$Patient,] # Origimed: 1 "Other_Treatments" (not targeted therapy), 2 "Treatment-naive"
-	load(file=paste0(OutDir,"../Therapy/clinall_treatments.RData"))
-	clinall = clinall[clinall$Patient %in% tmaf_kras$Patient,] # 4 received targeted treatment, 3 didn't, the others are NA's
-	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F) # here, unclear whether treatment came before or after sequencing
 }
 
 mutationalSignatures_preprocessing = function( OutDir ){
@@ -2942,165 +2581,6 @@ mutationalSignatures_preprocessing = function( OutDir ){
 	   index = index + 1
 	}
 	save(Sign_weights_df, file = paste0(OutDir, "Cosmic_Origimed_Sign_weights_unnormalized.RData" ))
-}
-
-mutationalSignatures_associations = function( OutDir ){
-
-	#### Downstream analyses
-	this_OutDir = paste0(OutDir,"All_signatures_associations/")
-	dir.create(this_OutDir)
-	###### TCGA
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	colorz_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"colorz"]
-	ordered_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"classes"]
-	load(file = paste0(OutDir, "TCGA_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[substr(rownames(Sign_weights_df),1,12) %in% rownames(Clin),]
-	rownames(tw) = substr(rownames(tw),1,12)
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"TCGA_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### ChenEAS
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Chen.RData" ))
-	load(file = paste0(OutDir, "ChenEAS_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"ChenEAS_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### Genie
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Genie.RData" ))
-	load(file = paste0(OutDir, "Genie_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Genie_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### Origimed
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Origimed.RData" ))
-	load(file = paste0(OutDir, "Origimed_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Origimed_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-
-	#### Cosmic, Downstream analyses
-	this_OutDir = paste0(OutDir,"All_signatures_associations_Cosmic/")
-	dir.create(this_OutDir)
-	###### TCGA
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	load(file = paste0(OutDir, "Cosmic_TCGA_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[substr(rownames(Sign_weights_df),1,12) %in% rownames(Clin),]
-	rownames(tw) = substr(rownames(tw),1,12)
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Cosmic_TCGA_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### ChenEAS
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Chen.RData" ))
-	load(file = paste0(OutDir, "Cosmic_ChenEAS_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Cosmic_ChenEAS_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### Genie
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Genie.RData" ))
-	load(file = paste0(OutDir, "Cosmic_Genie_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Cosmic_Genie_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
-	###### Genie
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Origimed.RData" ))
-	load(file = paste0(OutDir, "Cosmic_Origimed_Sign_weights_unnormalized.RData" ))
-	Clin = Clin[rownames(Clin) %in% rownames(Sign_weights_df),]
-	tw = Sign_weights_df[rownames(Sign_weights_df) %in% rownames(Clin),]
-	Clin = cbind(Clin,tw[rownames(Clin),])
-	Clin$egfr_class_consensus = factor(Clin$egfr_class_consensus, levels = ordered_classes)
-	Clin$colorz = "steelblue4"
-	Clin$colorz[Clin$egfr_class_consensus=="uncommon"] = "tomato3"
-	Clin$colorz[Clin$egfr_class_consensus=="compound"] = "mediumpurple4"
-	Clin$colorz[Clin$egfr_class_consensus=="T790M"] = "darksalmon"
-	Clin$colorz[Clin$egfr_class_consensus=="ex20ins"] = "orange2"
-	for (sign in colnames(tw)){
-	   fileName = paste0(this_OutDir,"Cosmic_Origimed_EGFRclass_vs_MutSign",sign,".pdf")
-	   x = Clin$egfr_class_consensus
-	   y = Clin[,sign]
-	   dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign," weights"), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = Clin$colorz, jitterDotSize = 2.5, fileWidth = 6, fileHeight = 5)
-	}
 }
 
 mutationalSignatures_egfr_muts_contexts = function( OutDir ){
@@ -4551,7 +4031,6 @@ DifferentialExpression_pooled = function( OutDir, comparisons_adj.P.Val_thresh )
 }
 
 ProliferationScoring = function( OutDir ){
-
 	library(singscore)
 	# cp = read.table(file=paste0("processed/for_Amaia_7Dec2023/","LocardPaulet_proliferationSignature.txt"),header=T)
 	cp = read.table(file=paste0(DataDir,"GOBP_CELL_CYCLE.v2024.1.Hs.grp"),header=T)
@@ -4640,29 +4119,6 @@ ProliferationScoring = function( OutDir ){
 	xcolorz = colorz_classes[ordered_classes %in% levels(x)]
 	jittercolorz = dan.expand_colors(as.character(x),levels(x),xcolorz)
 	dan.boxplots( fileName, x, y, xlab = "", ylab = "GO:BP Cell Cycle score", filllab = "EGFR class", plotTitle = "", signifTest = "wilcox.test", ylimLeft = NULL, ylimRight = NULL,comparisons = NULL, labelycoo = max(y), xColors = xcolorz, fillColors = "default", jitterColors = jittercolorz, labelJitteredPoints = NULL, jitterDotSize = 2, fileWidth = 3, fileHeight = 2.5, hlines_coo = NULL, hlines_labels = NULL )
-
-
-	# ###### Chen
-	# load(file = paste0( OutDir,"../Preprocessing/","Clin_Chen.RData" ))
-	# colorz_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"colorz"]
-	# ordered_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"classes"]
-	# load("/mnt/ndata/daniele/lung_multiregion/Data/Chen2020/ge_Chen2020_expcounts_GeneSymbols.RData") # ge_Chen2020_expcounts_GeneSymbols.RData ge_Chen2020_normalized_GeneSymbols.RData
-	# # load("/mnt/ndata/daniele/lung_multiregion/Data/Chen2020/ge_Chen2020_normalized_GeneSymbols.RData") # ge_Chen2020_expcounts_GeneSymbols.RData ge_Chen2020_normalized_GeneSymbols.RData
-	# rc = log2(ge+1)
-	# commonz = intersect(rownames(Clin),colnames(rc))
-	# logtpm = rc[,commonz]
-	# Clin = Clin[commonz,]
-	# rankData = rankGenes(logtpm)
-	# scoredf = simpleScore(rankData, upSet = cp$gene)
-	# Clin[rownames(scoredf),"LP_proliferation"] = scoredf$TotalScore
-	# Clin$Sample = Clin$Patient
-	# Clin$Dataset = "ChenEAS"
-	# clinall = rbind(clinall,Clin[,c( "Dataset","Sample","egfr_class_consensus","LP_proliferation" )])
-
-	fileName = paste0(OutDir,"Proliferation_acrossClass_acrossDatasets.pdf")
-	x = clinall$Dataset
-	y = clinall$LP_proliferation
-	dan.boxplots( fileName, x, y, fill = clinall$egfr_class_consensus, xlab = "", ylab = "GO:BP Cell Cycle score", filllab = "EGFR class", plotTitle = "", signifTest = "kruskal", ylimLeft = NULL, ylimRight = NULL,comparisons = NULL, labelycoo = max(y), xColors = "black", fillColors = "default", jitterColors = "black", labelJitteredPoints = NULL, jitterDotSize = 1, fileWidth = 4, fileHeight = 2.5, hlines_coo = NULL, hlines_labels = NULL )
 }
 
 ComparisonDegs = function( OutDir, comparisons_adj.P.Val_thresh ){
@@ -4719,6 +4175,7 @@ ComparisonDegs = function( OutDir, comparisons_adj.P.Val_thresh ){
 			a = as.data.frame(fgRes)
 	a = a[order(a$padj),]
 	a$overlapGenes = NULL
+	dir.create(paste0(OutDir,"../Paper_SupplTables/"))
 	dan.write(a,paste0(OutDir,"../Paper_SupplTables/TableS4.txt" ))			
 			a$pval = NULL
 			# a$padj = signif(a$padj,2)
@@ -4771,53 +4228,6 @@ ComparisonDegs = function( OutDir, comparisons_adj.P.Val_thresh ){
 	top[!(top$genes %in% c( selected_genes1,selected_genes2 )),"repel_labelz"] = ""
 	dan.scatterplot(paste0(OutDir,"volcano_uncommon_vs_compound.pdf"),x=top$UncommonVsCompound, y=-log10(top$nominalPval_UncommonVsCompound), fill=factor(top$Marker,levels=c( "uncommon","none","compound" )),fillColors=c( "tomato3","gray","mediumpurple4" ),repel_labels=top$repel_labelz,
 		xlab="log2(fold change)",ylab="-log10(p-value)",filllab="Marker of",dotSize=1,fileWidth=4.2,fileHeight=3,ylimLeft=0,ylimRight=ymax) # in cell cycle: PSRC1, SASS6, SKP2, TEX15
-}
-
-DifferentialProtein = function( OutDir ){
-	###### TCGA
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	colorz_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"colorz"]
-	ordered_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"classes"]
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	load("/mnt/ndata/daniele/lung_multiregion/rna-seq/Processed/TCGA_RPPA/rppa_tcga_luad.RData")
-	commonz = intersect(rownames(Clin),rownames(ge))
-	Clin = Clin[commonz,]
-	ge = ge[commonz,]
-	ge$Pattern = NULL
-	vdf = dan.df( colnames(ge),c( "Protein","pval","qval" ) )
-	for (v in rownames(vdf)){
-		vdf[v,"Protein"] = v
-		Clin$this_tr = as.numeric(ge[rownames(Clin),v])
-		vdf[v,"pval"] = kruskal.test(this_tr~egfr_class_consensus,data=Clin)$p.value
-	}
-	vdf$qval = p.adjust(vdf$pval,method="BH")
-	vdf = vdf[order(vdf$pval),]
-	save(vdf, file = paste0(OutDir,"TCGA_RPPA.RData"))
-}
-
-ViperAnalysis = function( OutDir ){
-	###### TCGA
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	colorz_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"colorz"]
-	ordered_classes = clco[rownames(clco) %in% (Clin$egfr_class_consensus),"classes"]
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_TCGA.RData" ))
-	viper = dan.read( file = paste0("/mnt/ndata/daniele/lung_multiregion/rna-seq/Processed/PatternSignatures/LtoSsignature_VIPER/ClassicalSignature_29Oct_3PatientsSplitted_qval0.1_logfc1/tcga_viper_SingleSample_GeneSymbols.txt"), row.names = 1)
-	colnames(viper) = gsub("\\.","-",colnames(viper))
-	commonz = intersect(colnames(viper),rownames(Clin))
-	Clin = Clin[commonz,]
-	viper = viper[,commonz]
-
-	vdf = dan.df( rownames(viper),c( "TR","pval","qval" ) )
-	viper = t(viper)
-	for (v in rownames(vdf)){
-		vdf[v,"TR"] = v
-		Clin$this_tr = viper[rownames(Clin),v]
-		vdf[v,"pval"] = kruskal.test(this_tr~egfr_class_consensus,data=Clin)$p.value
-	}
-
-	vdf$qval = p.adjust(vdf$pval,method="BH")
-	vdf = vdf[order(vdf$pval),]
-	save(vdf, file = paste0(OutDir,"TCGA_viper.RData"))
 }
 
 purity_associations = function( OutDir ){
@@ -5188,16 +4598,26 @@ therapy_associations = function( OutDir ){
 	Clin$treatment_targeted = tolower(ClinChen$TKI.treatment)
 	Clinc = Clin
 
-	### Filling in Chen
-	load(file = paste0( OutDir,"../Preprocessing/","Clin_Chen.RData" ))
-	chen_indir = "/mnt/ndata/daniele/lung_multiregion/rna-seq/Processed/PatternSignatures/LtoSsignature_onChen/"
-	load(file = paste0(chen_indir,"ClinChen.RData"))
-	ClinChen = ClinChen[rownames(Clin),]
-	dtable(ClinChen$TKI.treatment)
-	dtable(ClinChen$Chemo.treatment)
-	Clin$treatment_chemo = tolower(ClinChen$Chemo.treatment)
-	Clin$treatment_targeted = tolower(ClinChen$TKI.treatment)
-	Clinc = Clin
+	### Filling in Origimed
+	load(file=paste0( OutDir,"../Preprocessing/Clin_Origimed.RData" ))
+	origimed_treatment = dan.read(paste0(DataDir,"china_pan_origimed_2020/data_clinical_patient.txt"))
+	rownames(origimed_treatment) = origimed_treatment$PATIENT_ID
+	commonz = intersect(rownames(Clin),rownames(origimed_treatment))
+	origimed_treatment = origimed_treatment[commonz,]
+	Clin = Clin[commonz,]
+	Clin$treatment_targeted = NA
+	Clin[commonz,"treatment_targeted"] = "no"
+	Clin[origimed_treatment$TREATMENT=="Unknown","treatment_targeted"] = NA
+	Clin[grepl( "Targeted",origimed_treatment$TREATMENT ),"treatment_targeted"] = "yes"
+	Clin$treatment_chemo = NA
+	Clin[commonz,"treatment_chemo"] = "no"
+	Clin[origimed_treatment$TREATMENT=="Unknown","treatment_chemo"] = NA
+	Clin[grepl( "Chemotherapy",origimed_treatment$TREATMENT ),"treatment_chemo"] = "yes"
+	Clin$treatment_immuno = NA
+	Clin[commonz,"treatment_immuno"] = "no"
+	Clin[origimed_treatment$TREATMENT=="Unknown","treatment_immuno"] = NA
+	Clin[grepl( "Immunotherapy",origimed_treatment$TREATMENT ),"treatment_immuno"] = "yes"
+	Clino = Clin
 
 	Cling$Dataset = "Genie"
 	Cling$survival_data = !is.na(Cling$OS_status)
@@ -5205,13 +4625,16 @@ therapy_associations = function( OutDir ){
 	Clint$survival_data = !is.na(Clint$vital_status)
 	Clinc$Dataset = "ChenEAS"
 	Clinc$survival_data = !is.na(Clinc$OS.Status)
+	Clino$Dataset = "Origimed"
+	Clino$survival_data = NA
 
 	### how many, across datasets and across EGFR variant type, have targeted treatment data and survival data
 	colorz_classes = clco[rownames(clco) %in% (Cling$egfr_class_consensus),"colorz"]
 	ordered_classes = clco[rownames(clco) %in% (Cling$egfr_class_consensus),"classes"]
 	clinall = rbind(Cling[,c( "Dataset","Patient","egfr_class_consensus","treatment_targeted","survival_data" )],
 					Clint[,c( "Dataset","Patient","egfr_class_consensus","treatment_targeted","survival_data" )],
-					Clinc[,c( "Dataset","Patient","egfr_class_consensus","treatment_targeted","survival_data" )])
+					Clinc[,c( "Dataset","Patient","egfr_class_consensus","treatment_targeted","survival_data" )],
+					Clino[,c( "Dataset","Patient","egfr_class_consensus","treatment_targeted","survival_data" )])
 	save(clinall,file=paste0(OutDir,"clinall_treatments.RData"))
 	clinall[is.na(clinall$treatment_targeted),"treatment_targeted"] = "unavailable"
 
@@ -5371,7 +4794,8 @@ therapy_associations = function( OutDir ){
 
 
 	### same for immunotherapy (only genie)
-	tc = Cling
+	commonz = intersect(colnames(Cling),colnames(Clino))
+	tc = rbind(Cling[,commonz],Clino[,commonz])
 	tc[is.na(tc$treatment_immuno),"treatment_immuno"] = "unavailable"
 	tc2 = tc[tc$treatment_immuno!="unavailable",]
 	tabb = table(tc2[,"egfr_class_consensus"],tc2$treatment_immuno)
@@ -5388,14 +4812,16 @@ therapy_associations = function( OutDir ){
 	mt$treatment_immuno = factor(mt$treatment_immuno, levels=c( "yes","no","unavailable" ))
 	colorz_groups = c( "forestgreen","orange","gray" )
 	pg = ggplot(data=mt, aes(x=EGFR_class, y=Percentage, fill=treatment_immuno)) +
-	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle( "Genie" ) + scale_fill_manual(name = "Immunotherapy",values=colorz_groups) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle( "Genie and Origimed" ) + scale_fill_manual(name = "Immunotherapy",values=colorz_groups) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
 	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2)
-	pdf(paste0(OutDir,"Immunotherapy_EGFRclasses_Genie_barplot.pdf"),6,5,onefile=FALSE)
+	pdf(paste0(OutDir,"Immunotherapy_EGFRclasses_GenieOrigimed_barplot.pdf"),6,5,onefile=FALSE)
 	print(pg)
 	dev.off()
 
 	### same for immunotherapy (only genie), no unavailable
-	tc = Cling[!is.na(Cling$treatment_immuno),]
+	commonz = intersect(colnames(Cling),colnames(Clino))
+	tc = rbind(Cling[,commonz],Clino[,commonz])
+	tc = tc[!is.na(tc$treatment_immuno),]
 	tc2 = tc[tc$treatment_immuno!="unavailable",]
 	tabb = table(tc2[,"egfr_class_consensus"],tc2$treatment_immuno)
 	ch = chisq.test(tabb)$p.value # no difference
@@ -5411,9 +4837,9 @@ therapy_associations = function( OutDir ){
 	mt$treatment_immuno = factor(mt$treatment_immuno, levels=c( "yes","no" ))
 	colorz_groups = c( "forestgreen","orange" )
 	pg = ggplot(data=mt, aes(x=EGFR_class, y=Percentage, fill=treatment_immuno)) +
-	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle( paste0("Genie, Chi-square p-val = ",signif(ch,2)) ) + scale_fill_manual(name = "Immunotherapy",values=colorz_groups) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle( paste0("Genie and Origimed, Chi-square p-val = ",signif(ch,2)) ) + scale_fill_manual(name = "Immunotherapy",values=colorz_groups) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
 	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2)
-	pdf(paste0(OutDir,"Immunotherapy_EGFRclasses_Genie_NoUnavailable_barplot.pdf"),6,5,onefile=FALSE)
+	pdf(paste0(OutDir,"Immunotherapy_EGFRclasses_GenieOrigimed_NoUnavailable_barplot.pdf"),6,5,onefile=FALSE)
 	print(pg)
 	dev.off()
 
@@ -5949,6 +5375,7 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 	   	}
 	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
 	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	save(this_Clin,file = paste0(OutDir,"this_Clin_",this_treatmentclass,".RData"))
 	}
 
 	# Classify egfri generation
@@ -6266,6 +5693,7 @@ regimen_associations_FirstDrug_RegimenLevel = function( OutDir ){
 	   	}
 	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
 	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	save(this_Clin,file = paste0(OutDir,"this_Clin_",this_treatmentclass,".RData"))
 	}
 
 	# Classify egfri generation
@@ -6544,6 +5972,7 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 	   	}
 	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
 	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	save(this_Clin,file = paste0(OutDir,"this_Clin_",this_treatmentclass,".RData"))
 	}
 
 	# Classify egfri generation
@@ -6680,75 +6109,6 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 	   dev.off()
 }
 
-DepMap_preprocessing = function( OutDir ){
-	# DepMap Public 23Q4, downloaded from https://depmap.org/portal/download/all/ on 28/04/2024
-	dep = read.csv(paste0(DataDir,"DepMap_23Q4/Model.csv"),stringsAsFactors=F)
-	dep = dep[dep$OncotreeCode=="LUAD",]
-	muts = read.csv(paste0(DataDir,"DepMap_23Q4/OmicsSomaticMutations.csv"),stringsAsFactors=F)
-	muts = muts[muts$ModelID %in% dep$ModelID,]
-	muts$egfr_class_consensus = "wt/passenger"
-	rownames(muts) = paste0("u",rownames(muts) )
-	dep = dep[dep$ModelID %in% muts$ModelID,]
-	# let's classify EGFR variants
-	mutse = muts[((muts$HugoSymbol=="EGFR") %in% c(T)) & (nchar(muts$ProteinChange)>1),]
-	stringz = gsub("\\_.*","",mutse$ProteinChange )
-	stringz = gsub("\\*.*","",stringz)
-	stringz = as.numeric(gsub("\\D", "", stringz))
-	mutse$First_Codon = stringz
-	aa = sapply(1:length(mutse$ProteinChange),function(x) gsub(stringz[x],"",mutse$ProteinChange[x]))
-	stringz = as.numeric(gsub("\\D", "", aa))
-	mutse$Last_Codon = stringz
-	mutse[is.na(mutse$Last_Codon) | ( (mutse$Last_Codon<=mutse$First_Codon) %in% c(T) ),"Last_Codon" ] = mutse[is.na(mutse$Last_Codon) | ( (mutse$Last_Codon<=mutse$First_Codon) %in% c(T) ),"First_Codon" ]
-	mutse = mutse[order(mutse$First_Codon),]
-	mutse = mutse[(mutse$First_Codon>=688) & (mutse$First_Codon<=875), ]
-	mutse[(mutse$VariantInfo=="inframe_deletion") & ( (mutse$First_Codon<=755) | (mutse$Last_Codon>=746) ),"egfr_class_consensus"] = "common"
-	mutse[mutse$ProteinChange=="p.L858R","egfr_class_consensus"] = "common"
-	mutse[mutse$ProteinChange=="p.T790M","egfr_class_consensus"] = "T790M"
-	mutse[(mutse$VariantInfo=="inframe_insertion") & ( (mutse$First_Codon<=774) | (mutse$Last_Codon>=762) ),"egfr_class_consensus"] = "ex20ins"
-	mutse[mutse$egfr_class_consensus=="wt/passenger","egfr_class_consensus"] = "uncommon" # the only uncommon, p.A750P, is a true uncommon (found in ec)
-	rownames(dep) = dep$ModelID
-	for (rn in rownames(dep)){
-		if (!(rn %in% mutse$ModelID)){ 
-			dep[rn,"egfr_class_consensus"] = "wt/passenger"
-		} else {
-			all_muts = mutse[mutse$ModelID==rn,"egfr_class_consensus"]
-			all_muts_unf = all_muts
-			all_muts = all_muts[all_muts %in% c( "common","uncommon" )]
-			if (length(all_muts)>0){
-				if ((length(unique(all_muts))==1) & (unique(all_muts)=="common")){ 
-				dep[rn,"egfr_class_consensus"] = "common" 
-				} else {
-					dep[rn,"egfr_class_consensus"] = "compound" 
-				}
-				if ((length(all_muts)==1) & (unique(all_muts)=="uncommon")){ dep[rn,"egfr_class_consensus"] = "uncommon" }
-			}
-			if (any(tolower(all_muts_unf)=="t790m")) { dep[rn,"egfr_class_consensus"] = "T790M" }
-			if (any(all_muts_unf=="ex20ins")) { dep[rn,"egfr_class_consensus"] = "ex20ins" }
-		}
-	}
-	cri = read.csv(paste0(DataDir,"DepMap_23Q4/CRISPRGeneEffect.csv"),stringsAsFactors=F)
-	rownames(cri) = cri$X
-	cri = cri[rownames(cri) %in% dep$ModelID,]
-	dep$egfr_crispr_effect = NA
-	dep[rownames(cri),"egfr_crispr_effect"] = cri[,grepl("EGFR",colnames(cri))]
-	save(dep,file = paste0(OutDir,"dep.RData"))
-}
-
-DepMap_analysis = function( OutDir ){
-	load(file = paste0(OutDir,"dep.RData"))
-	dep = dep[!is.na(dep$egfr_crispr_effect),]
-	x = dep$egfr_class_consensus=="wt/passenger"
-	x2 = x
-	x2[x] = "EGFR wild-type or \npassenger mutation"
-	x2[!x] = "EGFR mutant"
-	x2 = factor(x2, levels = c( "EGFR wild-type or \npassenger mutation","EGFR mutant" ))
-	y = dep$egfr_crispr_effect
-	colorz = rep("gray",nrow(dep))
-	colorz[dep$egfr_class_consensus=="common"] = "steelblue4"
-	colorz[dep$egfr_class_consensus=="T790M"] = "darksalmon"
-	dan.boxplots(paste0( OutDir,"EGFRclass_vs_EGFRdependency.pdf" ),x2,y,xlab="",ylab="Gene dependency score",signifTest="wilcox",labelycoo=max(y),jitterColors=colorz,fileWidth = 5, fileHeight = 5)
-}
-
 supplementary_tables_formatting = function( OutDir ){
 
 	load(file=paste0( OutDir,"../Genomic_coMutations/AllDatasets_signifComutated_table.RData" ))
@@ -6758,6 +6118,694 @@ supplementary_tables_formatting = function( OutDir ){
 	load(file = paste0(OutDir,"../Expression/Limma_table_AllDatasets_AllGenes_AllVsAll_comparisonsSignLevel0.1.RData"))
 	dan.write(final,file = paste0(OutDir, "TableS3.txt"))
 }
+
+revision_L858R_compound_vs_single = function( OutDir ){
+	### patient filtering
+	patients_L858R = c()
+	first = TRUE
+	for (dataset in c( "Genie","TCGA","Chen","TRACERx421","Zhang","Origimed" )){
+		load(file = paste0( OutDir,"../../Preprocessing/Clin_",dataset,".RData" ))
+		maxid = max(as.numeric(gsub("egfr_mut_","",colnames(Clin)[substr(colnames(Clin),1,9)=="egfr_mut_"])))
+		this_cb = dan.df( 0,c("Hugo_Symbol","Sample_ID","Protein_Change","Class","egfr_class_consensus" ))
+		for (id in 1:maxid){ this_cb = rbind(this_cb,data.frame( Hugo_Symbol="EGFR",Sample_ID=Clin$Patient,Protein_Change=gsub("p.","",Clin[,paste0( "egfr_mut_",id )]),Class=Clin[,paste0( "egfr_class_",id )],egfr_class_consensus=Clin[,paste0( "egfr_class_consensus" )],stringsAsFactors=F )) }
+		this_cb = this_cb[!is.na(this_cb$Class),]
+		this_cb$Dataset = dataset
+		if (first){
+			cb = this_cb
+			first = FALSE
+		} else {
+			cb = rbind(cb,this_cb)
+		}
+		patients_L858R = c(patients_L858R, unique(this_cb[this_cb$Protein_Change=="L858R","Sample_ID"]))
+	}
+
+	# compound compositions
+	patients_compounds_CommonWithL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change=="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change!="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = patients_compounds_CommonWithoutL858R[!(patients_compounds_CommonWithoutL858R %in% patients_compounds_CommonWithL858R)]
+	patients_compounds = unique(cb[cb$egfr_class_consensus=="compound","Sample_ID"])
+	patients_compounds_MultipleUncommon = patients_compounds[!(patients_compounds %in% c( patients_compounds_CommonWithL858R,patients_compounds_CommonWithoutL858R ))]
+	n1 = length(patients_compounds_CommonWithL858R)
+	n2 = length(patients_compounds_CommonWithoutL858R)
+	n3 = length(patients_compounds_MultipleUncommon)
+	pie = data.frame( Percentage=c( n1,n2,n3 )/sum(c( n1,n2,n3 )),label=c( n1,n2,n3 ),Compound=c( "with L858R" ,"with ex19del","multiple uncommon"),stringsAsFactors=F )
+	pie$Compound = factor( pie$Compound,levels = as.character(pie$Compound) )
+	library(ggplot2)
+	library(dplyr)
+	plot = ggplot(pie, aes(x="", y=Percentage, fill=Compound)) +
+	  geom_bar(stat="identity", width=1, color="white") +
+	  coord_polar("y", start=0) +
+	  theme_void() + 
+	  geom_text(aes(x=1.25,label = label),
+	            position = position_stack(vjust = 0.5),size=size_labels) +
+  		scale_fill_manual( values=c( "mediumorchid2","mediumpurple3","darkmagenta" ) )
+	pdf( paste0(OutDir,"Pie_compounds_origin.pdf"),2.5,2.5 )
+	plot=plot+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(plot)
+	dev.off()
+
+	ordered_classes = c( "common","compound" )
+	colorz_classes = c( "deepskyblue3","mediumorchid2" )
+	### clinical associations
+	load( paste0( OutDir,"../../Clinical/Clinall.RData" ) )
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	# Sex: negative association
+ 	tc = Clinall[!is.na(Clinall[,"Sex"]),]
+	tabb = table(tc[,"Sex"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Sex","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Sex=="female") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="female"))
+	mt[(mt$Sex=="male") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="male"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Sex, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Sex_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Stage"]),]
+	tabb = table(tc[,"Stage"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Stage","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Stage=="I") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="I"))
+	mt[(mt$Stage=="II") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="II"))
+	mt[(mt$Stage=="III") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="III"))
+	mt[(mt$Stage=="IV") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="IV"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Stage, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("Tumor stage") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Stage_onlyAll_barplot.pdf"),3,2.5,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Race"]),]
+	# tc = tc[!( tc$Race %in% c( "native american","pacific islander" ) ),]
+	tc$Race2 = "non-asian"
+	tc$Race2[(tc$Race=="asian") %in% c(T)] = "asian"
+	tc$Race = tc$Race2
+	tabb = table(tc[,"Race"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Race","EGFR_class","Percentage" )
+	mt$Race = factor( mt$Race, levels = c( "asian","non-asian" ) )
+	mt$TotalPatients = NA
+	mt[(mt$Race=="asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="asian"))
+	mt[(mt$Race=="non-asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="non-asian"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Race, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Race_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt')) 
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Smoking"]),]
+	tabb = table(tc[,"Smoking"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Smoking","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Smoking=="ever smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="ever smoker"))
+	mt[(mt$Smoking=="never smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="never smoker"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Smoking, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Smoking_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Age"]),]
+	tc$Age = as.numeric(tc$Age)
+	fileName = paste0(OutDir,"EGFRclasses_Age_onlyAll_boxplot.pdf")
+	tc$egfr_class_consensus = factor(tc$egfr_class_consensus,levels=ordered_classes)
+	jitterColors = dan.expand_colors( tc$egfr_class_consensus, ordered_classes, colorz_classes )
+	dan.boxplots(fileName,x = tc$egfr_class_consensus, y=tc$Age, xlab="", ylab="Age (years)", labelycoo=max(tc$Age), xColors=colorz_classes, jitterColors=jitterColors,jitterDotSize=1, fileWidth = 2.5, fileHeight = 2.5)
+	### signatures associations
+	load(file=paste0(OutDir,"../../MutSignatures/All_signatures_associations_binary_threshold0.3/Clin_all.RData"))
+	Clin_all$egfr_class_consensus = as.character(Clin_all$egfr_class_consensus)
+	Clin_all = Clin_all[Clin_all$Patient %in% patients_L858R,]	
+	sign = "Signature.4"
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all[,sign]
+	tabb = table(Clin_all[,sign],Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]==0) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==0))
+	mt[(mt[,"Signature"]==1) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==1))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pall = ggplot(data=mt, aes(x=as.character(Signature), y=Percentage, fill=EGFR_class)) +
+		geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+		geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"All_EGFRclass_vs_MutSign_",sign,".pdf"),2.5,2.5,onefile=FALSE)
+	pall=pall+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	# plot=ggarrange(tcga_pa[[sign]], chen_pa[[sign]], genie_pa[[sign]], origimed_pa[[sign]], zhang_pa[[sign]], tracerx_pa[[sign]], pall, common.legend=TRUE,ncol = 7, nrow = 1)
+	print(pall)
+	dev.off()
+	sign = "Signature.4"
+	Clin_all = Clin_all[(Clin_all$Smoking %in% c( "ever smoker","never smoker" )) %in% c(T),]
+	Clin_all$Confirmed_smoker = NA
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Ever smoker and\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Ever smoker but\n inactive signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Never smoker but\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Never smoker and\n inactive signature 4"
+	Clin_all = Clin_all[!is.na(Clin_all$Confirmed_smoker),]
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_ConfirmedSmoking_extended.pdf")
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all$Confirmed_smoker
+	tabb = table(Clin_all$Confirmed_smoker,Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]=="Never smoker and\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker and\n inactive signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker and\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker and\n active signature 4"))
+	mt[(mt[,"Signature"]=="Never smoker but\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker but\n active signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker but\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker but\n inactive signature 4"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	mt$Signature = factor(mt$Signature,levels=c( "Never smoker and\n inactive signature 4","Ever smoker but\n inactive signature 4","Never smoker but\n active signature 4","Ever smoker and\n active signature 4" ))
+	pa = ggplot(data=mt, aes(x=Signature, y=Percentage, fill=EGFR_class)) +
+	geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(fileName,3,2.8)
+	pa=pa+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	### mutations associations
+	load(file=paste0( OutDir,"../../Genomic_TmbFga/TMB_nonsyn_Clinall.RData" ))
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	Clinall$egfr_class_consensus = as.character(Clinall$egfr_class_consensus)
+	sign = "TMB_nonsyn_rankNorm"
+	tc = Clinall[!is.na(Clinall[,sign]),]
+	x = tc$egfr_class_consensus
+	y = (as.numeric(tc[,sign]))
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_",sign,"_boxplots.pdf")
+	tc$colorz = dan.expand_colors(tc$egfr_class_consensus,ordered_classes,colorz_classes)
+	dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = tc$colorz, jitterDotSize = 1, fileWidth = 3, fileHeight = 2.5)
+	### treatment associations
+	ordered_classes = c( "common","compound" )
+	colorz_classes = c( "deepskyblue3","mediumpurple3" )
+	for (this_treatmentclass in c( "chemo","egfri","immuno" ) ){ # anti_angio
+		this_treatmentclass_alias = this_treatmentclass
+		if (this_treatmentclass=="immuno") { this_treatmentclass_alias="immunotherapy" }
+		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
+		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
+		dcat( this_treatmentclass )
+		load(paste0(OutDir,"../../Therapy/Regimens_FirstDrug_PatientLevel/this_Clin_",this_treatmentclass,".RData"))
+		this_Clin = this_Clin[this_Clin$Patient %in% patients_L858R,]
+		this_Clin$egfr_class_consensus = as.character(this_Clin$egfr_class_consensus)
+		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
+		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
+		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
+		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
+		print(km_gs)
+		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
+		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
+		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
+		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
+		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
+		dev.off()
+	}
+
+}
+
+
+revision_ex19del_compound_vs_single = function( OutDir ){
+	### patient filtering
+	patients_L858R = c()
+	first = TRUE
+	for (dataset in c( "Genie","TCGA","Chen","TRACERx421","Zhang","Origimed" )){
+		load(file = paste0( OutDir,"../../Preprocessing/Clin_",dataset,".RData" ))
+		maxid = max(as.numeric(gsub("egfr_mut_","",colnames(Clin)[substr(colnames(Clin),1,9)=="egfr_mut_"])))
+		this_cb = dan.df( 0,c("Hugo_Symbol","Sample_ID","Protein_Change","Class","egfr_class_consensus" ))
+		for (id in 1:maxid){ this_cb = rbind(this_cb,data.frame( Hugo_Symbol="EGFR",Sample_ID=Clin$Patient,Protein_Change=gsub("p.","",Clin[,paste0( "egfr_mut_",id )]),Class=Clin[,paste0( "egfr_class_",id )],egfr_class_consensus=Clin[,paste0( "egfr_class_consensus" )],stringsAsFactors=F )) }
+		this_cb = this_cb[!is.na(this_cb$Class),]
+		this_cb$Dataset = dataset
+		if (first){
+			cb = this_cb
+			first = FALSE
+		} else {
+			cb = rbind(cb,this_cb)
+		}
+		patients_L858R = c(patients_L858R, unique(this_cb[(this_cb$Protein_Change!="L858R") & ( this_cb$egfr_class_consensus %in% "common" ),"Sample_ID"]))
+	}
+
+	# compound compositions
+	patients_compounds_CommonWithL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change=="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change!="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = patients_compounds_CommonWithoutL858R[!(patients_compounds_CommonWithoutL858R %in% patients_compounds_CommonWithL858R)]
+	patients_compounds = unique(cb[cb$egfr_class_consensus=="compound","Sample_ID"])
+	patients_compounds_MultipleUncommon = patients_compounds[!(patients_compounds %in% c( patients_compounds_CommonWithL858R,patients_compounds_CommonWithoutL858R ))]
+	patients_L858R = unique(c(patients_L858R,patients_compounds_CommonWithoutL858R))
+
+
+	ordered_classes = c( "common","compound" )
+	colorz_classes = c( "deepskyblue4","mediumpurple3" )
+	### clinical associations
+	load( paste0( OutDir,"../../Clinical/Clinall.RData" ) )
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	# Sex: negative association
+ 	tc = Clinall[!is.na(Clinall[,"Sex"]),]
+	tabb = table(tc[,"Sex"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Sex","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Sex=="female") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="female"))
+	mt[(mt$Sex=="male") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="male"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Sex, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Sex_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Stage"]),]
+	tabb = table(tc[,"Stage"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Stage","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Stage=="I") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="I"))
+	mt[(mt$Stage=="II") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="II"))
+	mt[(mt$Stage=="III") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="III"))
+	mt[(mt$Stage=="IV") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="IV"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Stage, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("Tumor stage") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Stage_onlyAll_barplot.pdf"),3,2.5,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Race"]),]
+	# tc = tc[!( tc$Race %in% c( "native american","pacific islander" ) ),]
+	tc$Race2 = "non-asian"
+	tc$Race2[(tc$Race=="asian") %in% c(T)] = "asian"
+	tc$Race = tc$Race2
+	tabb = table(tc[,"Race"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Race","EGFR_class","Percentage" )
+	mt$Race = factor( mt$Race, levels = c( "asian","non-asian" ) )
+	mt$TotalPatients = NA
+	mt[(mt$Race=="asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="asian"))
+	mt[(mt$Race=="non-asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="non-asian"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Race, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Race_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt')) 
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Smoking"]),]
+	tabb = table(tc[,"Smoking"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Smoking","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Smoking=="ever smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="ever smoker"))
+	mt[(mt$Smoking=="never smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="never smoker"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Smoking, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Smoking_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Age"]),]
+	tc$Age = as.numeric(tc$Age)
+	fileName = paste0(OutDir,"EGFRclasses_Age_onlyAll_boxplot.pdf")
+	tc$egfr_class_consensus = factor(tc$egfr_class_consensus,levels=ordered_classes)
+	jitterColors = dan.expand_colors( tc$egfr_class_consensus, ordered_classes, colorz_classes )
+	dan.boxplots(fileName,x = tc$egfr_class_consensus, y=tc$Age, xlab="", ylab="Age (years)", labelycoo=max(tc$Age), xColors=colorz_classes, jitterColors=jitterColors,jitterDotSize=1, fileWidth = 2.5, fileHeight = 2.5)
+	### signatures associations
+	load(file=paste0(OutDir,"../../MutSignatures/All_signatures_associations_binary_threshold0.3/Clin_all.RData"))
+	Clin_all$egfr_class_consensus = as.character(Clin_all$egfr_class_consensus)
+	Clin_all = Clin_all[Clin_all$Patient %in% patients_L858R,]	
+	sign = "Signature.4"
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all[,sign]
+	tabb = table(Clin_all[,sign],Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]==0) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==0))
+	mt[(mt[,"Signature"]==1) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==1))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pall = ggplot(data=mt, aes(x=as.character(Signature), y=Percentage, fill=EGFR_class)) +
+		geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+		geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"All_EGFRclass_vs_MutSign_",sign,".pdf"),2.5,2.5,onefile=FALSE)
+	pall=pall+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	# plot=ggarrange(tcga_pa[[sign]], chen_pa[[sign]], genie_pa[[sign]], origimed_pa[[sign]], zhang_pa[[sign]], tracerx_pa[[sign]], pall, common.legend=TRUE,ncol = 7, nrow = 1)
+	print(pall)
+	dev.off()
+	sign = "Signature.4"
+	Clin_all = Clin_all[(Clin_all$Smoking %in% c( "ever smoker","never smoker" )) %in% c(T),]
+	Clin_all$Confirmed_smoker = NA
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Ever smoker and\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Ever smoker but\n inactive signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Never smoker but\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Never smoker and\n inactive signature 4"
+	Clin_all = Clin_all[!is.na(Clin_all$Confirmed_smoker),]
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_ConfirmedSmoking_extended.pdf")
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all$Confirmed_smoker
+	tabb = table(Clin_all$Confirmed_smoker,Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]=="Never smoker and\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker and\n inactive signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker and\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker and\n active signature 4"))
+	mt[(mt[,"Signature"]=="Never smoker but\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker but\n active signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker but\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker but\n inactive signature 4"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	mt$Signature = factor(mt$Signature,levels=c( "Never smoker and\n inactive signature 4","Ever smoker but\n inactive signature 4","Never smoker but\n active signature 4","Ever smoker and\n active signature 4" ))
+	pa = ggplot(data=mt, aes(x=Signature, y=Percentage, fill=EGFR_class)) +
+	geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(fileName,3,2.8)
+	pa=pa+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	### mutations associations
+	load(file=paste0( OutDir,"../../Genomic_TmbFga/TMB_nonsyn_Clinall.RData" ))
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	Clinall$egfr_class_consensus = as.character(Clinall$egfr_class_consensus)
+	sign = "TMB_nonsyn_rankNorm"
+	tc = Clinall[!is.na(Clinall[,sign]),]
+	x = tc$egfr_class_consensus
+	y = (as.numeric(tc[,sign]))
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_",sign,"_boxplots.pdf")
+	tc$colorz = dan.expand_colors(tc$egfr_class_consensus,ordered_classes,colorz_classes)
+	dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = tc$colorz, jitterDotSize = 1, fileWidth = 3, fileHeight = 2.5)
+	### treatment associations
+	ordered_classes = c( "common","compound" )
+	colorz_classes = c( "deepskyblue3","mediumpurple3" )
+	for (this_treatmentclass in c( "chemo","egfri","immuno" ) ){ # anti_angio
+		this_treatmentclass_alias = this_treatmentclass
+		if (this_treatmentclass=="immuno") { this_treatmentclass_alias="immunotherapy" }
+		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
+		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
+		dcat( this_treatmentclass )
+		load(paste0(OutDir,"../../Therapy/Regimens_FirstDrug_PatientLevel/this_Clin_",this_treatmentclass,".RData"))
+		this_Clin = this_Clin[this_Clin$Patient %in% patients_L858R,]
+		this_Clin$egfr_class_consensus = as.character(this_Clin$egfr_class_consensus)
+		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
+		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
+		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
+		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
+		print(km_gs)
+		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
+		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
+		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
+		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
+		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
+		dev.off()
+	}
+	
+}
+
+revision_DoubleUncommon_compound_vs_anyCommon = function( OutDir ){
+	### patient filtering
+	patients_L858R = c()
+	first = TRUE
+	for (dataset in c( "Genie","TCGA","Chen","TRACERx421","Zhang","Origimed" )){
+		load(file = paste0( OutDir,"../../Preprocessing/Clin_",dataset,".RData" ))
+		maxid = max(as.numeric(gsub("egfr_mut_","",colnames(Clin)[substr(colnames(Clin),1,9)=="egfr_mut_"])))
+		this_cb = dan.df( 0,c("Hugo_Symbol","Sample_ID","Protein_Change","Class","egfr_class_consensus" ))
+		for (id in 1:maxid){ this_cb = rbind(this_cb,data.frame( Hugo_Symbol="EGFR",Sample_ID=Clin$Patient,Protein_Change=gsub("p.","",Clin[,paste0( "egfr_mut_",id )]),Class=Clin[,paste0( "egfr_class_",id )],egfr_class_consensus=Clin[,paste0( "egfr_class_consensus" )],stringsAsFactors=F )) }
+		this_cb = this_cb[!is.na(this_cb$Class),]
+		this_cb$Dataset = dataset
+		if (first){
+			cb = this_cb
+			clinall = Clin[,c( "Patient","egfr_class_consensus" )]
+			first = FALSE
+		} else {
+			cb = rbind(cb,this_cb)
+			clinall = rbind(clinall, Clin[,c( "Patient","egfr_class_consensus" )])
+		}
+		patients_L858R = c(patients_L858R, unique(this_cb[( this_cb$egfr_class_consensus %in% "common" ),"Sample_ID"]))
+	}
+
+	# compound compositions
+	patients_compounds_CommonWithL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change=="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = unique(cb[((cb$egfr_class_consensus=="compound") & (cb$Class=="common")) & (cb$Protein_Change!="L858R"),"Sample_ID" ])
+	patients_compounds_CommonWithoutL858R = patients_compounds_CommonWithoutL858R[!(patients_compounds_CommonWithoutL858R %in% patients_compounds_CommonWithL858R)]
+	patients_compounds = unique(cb[cb$egfr_class_consensus=="compound","Sample_ID"])
+	patients_compounds_MultipleUncommon = patients_compounds[!(patients_compounds %in% c( patients_compounds_CommonWithL858R,patients_compounds_CommonWithoutL858R ))]
+	patients_L858R = unique(c(patients_L858R,patients_compounds_MultipleUncommon))
+
+
+	ordered_classes = c( "common","compound" )
+	colorz_classes = c( "steelblue4","darkmagenta" )
+	### clinical associations
+	load( paste0( OutDir,"../../Clinical/Clinall.RData" ) )
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	# Sex: negative association
+ 	tc = Clinall[!is.na(Clinall[,"Sex"]),]
+	tabb = table(tc[,"Sex"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Sex","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Sex=="female") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="female"))
+	mt[(mt$Sex=="male") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Sex=="male"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Sex, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Sex_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Stage"]),]
+	tabb = table(tc[,"Stage"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Stage","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Stage=="I") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="I"))
+	mt[(mt$Stage=="II") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="II"))
+	mt[(mt$Stage=="III") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="III"))
+	mt[(mt$Stage=="IV") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Stage=="IV"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Stage, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("Tumor stage") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Stage_onlyAll_barplot.pdf"),3,2.5,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Race"]),]
+	# tc = tc[!( tc$Race %in% c( "native american","pacific islander" ) ),]
+	tc$Race2 = "non-asian"
+	tc$Race2[(tc$Race=="asian") %in% c(T)] = "asian"
+	tc$Race = tc$Race2
+	tabb = table(tc[,"Race"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Race","EGFR_class","Percentage" )
+	mt$Race = factor( mt$Race, levels = c( "asian","non-asian" ) )
+	mt$TotalPatients = NA
+	mt[(mt$Race=="asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="asian"))
+	mt[(mt$Race=="non-asian") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Race=="non-asian"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Race, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Race_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt')) 
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Smoking"]),]
+	tabb = table(tc[,"Smoking"],tc$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Smoking","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$Smoking=="ever smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="ever smoker"))
+	mt[(mt$Smoking=="never smoker") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(tc$Smoking=="never smoker"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=Smoking, y=Percentage, fill=EGFR_class)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = 6/.pt) + geom_text(aes(label=round(Percentage,1)), size = 6/.pt, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"EGFRclasses_Smoking_onlyAll_barplot.pdf"),2.8,2.8,onefile=FALSE)
+	pa = pa + theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	tc = Clinall[!is.na(Clinall[,"Age"]),]
+	tc$Age = as.numeric(tc$Age)
+	fileName = paste0(OutDir,"EGFRclasses_Age_onlyAll_boxplot.pdf")
+	tc$egfr_class_consensus = factor(tc$egfr_class_consensus,levels=ordered_classes)
+	jitterColors = dan.expand_colors( tc$egfr_class_consensus, ordered_classes, colorz_classes )
+	dan.boxplots(fileName,x = tc$egfr_class_consensus, y=tc$Age, xlab="", ylab="Age (years)", labelycoo=max(tc$Age), xColors=colorz_classes, jitterColors=jitterColors,jitterDotSize=1, fileWidth = 2.5, fileHeight = 2.5)
+	### signatures associations
+	load(file=paste0(OutDir,"../../MutSignatures/All_signatures_associations_binary_threshold0.3/Clin_all.RData"))
+	Clin_all$egfr_class_consensus = as.character(Clin_all$egfr_class_consensus)
+	Clin_all = Clin_all[Clin_all$Patient %in% patients_L858R,]	
+	sign = "Signature.4"
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all[,sign]
+	tabb = table(Clin_all[,sign],Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]==0) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==0))
+	mt[(mt[,"Signature"]==1) & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all[,sign]==1))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pall = ggplot(data=mt, aes(x=as.character(Signature), y=Percentage, fill=EGFR_class)) +
+		geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+		geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(paste0(OutDir,"All_EGFRclass_vs_MutSign_",sign,".pdf"),2.5,2.5,onefile=FALSE)
+	pall=pall+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	# plot=ggarrange(tcga_pa[[sign]], chen_pa[[sign]], genie_pa[[sign]], origimed_pa[[sign]], zhang_pa[[sign]], tracerx_pa[[sign]], pall, common.legend=TRUE,ncol = 7, nrow = 1)
+	print(pall)
+	dev.off()
+	sign = "Signature.4"
+	Clin_all = Clin_all[(Clin_all$Smoking %in% c( "ever smoker","never smoker" )) %in% c(T),]
+	Clin_all$Confirmed_smoker = NA
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Ever smoker and\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="ever smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Ever smoker but\n inactive signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==1),"Confirmed_smoker"] = "Never smoker but\n active signature 4"
+	Clin_all[(Clin_all$Smoking=="never smoker") & (Clin_all[,sign]==0),"Confirmed_smoker"] = "Never smoker and\n inactive signature 4"
+	Clin_all = Clin_all[!is.na(Clin_all$Confirmed_smoker),]
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_ConfirmedSmoking_extended.pdf")
+	x = Clin_all$egfr_class_consensus
+	y = Clin_all$Confirmed_smoker
+	tabb = table(Clin_all$Confirmed_smoker,Clin_all$egfr_class_consensus)
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "Signature","EGFR_class","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt[,"Signature"]=="Never smoker and\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker and\n inactive signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker and\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker and\n active signature 4"))
+	mt[(mt[,"Signature"]=="Never smoker but\n active signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Never smoker but\n active signature 4"))
+	mt[(mt[,"Signature"]=="Ever smoker but\n inactive signature 4") & (mt$EGFR_class=="common"),"TotalPatients"] = paste0( "N = ",sum(Clin_all$Confirmed_smoker=="Ever smoker but\n inactive signature 4"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	mt$Signature = factor(mt$Signature,levels=c( "Never smoker and\n inactive signature 4","Ever smoker but\n inactive signature 4","Never smoker but\n active signature 4","Ever smoker and\n active signature 4" ))
+	pa = ggplot(data=mt, aes(x=Signature, y=Percentage, fill=EGFR_class)) +
+	geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("All datasets, ",sign,"\n","Chi-square test, p = ",signif(ch,2)) ) + scale_fill_manual(name = "EGFR mutation class",values=colorz_classes) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	geom_text(aes(label=TotalPatients,y=100),vjust=-0.2,size = size_labels) + geom_text(aes(label=round(Percentage,1)), size = size_labels, position = position_stack(vjust = 0.5))
+	pdf(fileName,3,2.8)
+	pa=pa+theme(text = element_text(size=6), legend.text=element_text(size=6), legend.title = element_text(size = 6), plot.title = element_text(size = 6), axis.title = element_text(size = 6), axis.text.x = element_text(size = 6), axis.text.y = element_text(size = 6), legend.key.size = unit(10, 'pt'))
+	print(pa)
+	dev.off()
+	### mutations associations
+	load(file=paste0( OutDir,"../../Genomic_TmbFga/TMB_nonsyn_Clinall.RData" ))
+	Clinall = Clinall[Clinall$Patient %in% patients_L858R,]
+	Clinall$egfr_class_consensus = as.character(Clinall$egfr_class_consensus)
+	sign = "TMB_nonsyn_rankNorm"
+	tc = Clinall[!is.na(Clinall[,sign]),]
+	x = tc$egfr_class_consensus
+	y = (as.numeric(tc[,sign]))
+	fileName = paste0(OutDir,"AllDatasets_EGFRclass_vs_",sign,"_boxplots.pdf")
+	tc$colorz = dan.expand_colors(tc$egfr_class_consensus,ordered_classes,colorz_classes)
+	dan.boxplots( fileName, x, y, fill = NULL, xlab = "", ylab = paste0(sign), plotTitle = "", signifTest = "kruskal", comparisons = NULL, labelycoo = max(y)+0.01, xColors = colorz_classes, jitterColors = tc$colorz, jitterDotSize = 1, fileWidth = 3, fileHeight = 2.5)
+	### treatment associations
+	for (this_treatmentclass in c( "chemo","egfri","immuno" ) ){ # anti_angio
+		this_treatmentclass_alias = this_treatmentclass
+		if (this_treatmentclass=="immuno") { this_treatmentclass_alias="immunotherapy" }
+		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
+		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
+		dcat( this_treatmentclass )
+		load(paste0(OutDir,"../../Therapy/Regimens_FirstDrug_PatientLevel/this_Clin_",this_treatmentclass,".RData"))
+		this_Clin = this_Clin[this_Clin$Patient %in% patients_L858R,]
+		this_Clin$egfr_class_consensus = as.character(this_Clin$egfr_class_consensus)
+		if (sum(table(this_Clin$egfr_class_consensus)>=3)<2) { next }
+		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
+		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
+		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
+		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
+		print(km_gs)
+		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
+		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
+		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
+		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
+		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
+		dev.off()
+	}
+	
+}
+
+krasmut_vs_treatment = function( OutDir ){
+	### did they arise post-treatment?
+	load(file=paste0( OutDir,"../../Preprocessing/tcAll_vafs.RData" ))
+	load(file=paste0( OutDir,"../../Genomic_coMutations/tmaf_kras.RData" ))
+	load(file=paste0( OutDir,"../../Genomic_coMutations/tclin_gamAll.RData" ))
+	for (p in tmaf_kras$Patient){
+		tmaf_kras[tmaf_kras$Patient==p,"egfr_class_consensus"] = tclin[p,"egfr_class_consensus"]
+		tmaf_kras[tmaf_kras$Patient==p,"Dataset"] = tclin[p,"Dataset"]
+	}
+	ordered_classes = clco[rownames(clco) %in% (tmaf_kras$egfr_class_consensus),"classes"]
+	origimed_treatment = dan.read(paste0(DataDir,"china_pan_origimed_2020/data_clinical_patient.txt"))
+	rownames(origimed_treatment) = origimed_treatment$PATIENT_ID
+	origimed_treatment$treatment_targeted = "no"
+	origimed_treatment[origimed_treatment$TREATMENT=="Unknown","treatment_targeted"] = NA
+	origimed_treatment[grepl( "Targeted",origimed_treatment$TREATMENT ),"treatment_targeted"] = "yes"
+	# origimed_treatment = origimed_treatment[origimed_treatment$PATIENT_ID %in% tmaf_kras$Patient,] # Origimed: 1 "Other_Treatments" (not targeted therapy), 2 "Treatment-naive"
+	load(file=paste0(OutDir,"../../Therapy/clinall_treatments.RData"))
+	clinall = clinall[clinall$Patient %in% tmaf_kras$Patient,] # 4 received targeted treatment, 3 didn't, the others are NA's
+	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F) # here, unclear whether treatment came before or after sequencing
+	reg = reg[reg$record_id %in% tmaf_kras$Patient,] # none
+	# in uncommon patients, are there more kras-mutants in those that did receive targeted therapy?
+	load(file=paste0(OutDir,"../../Therapy/clinall_treatments.RData"))
+	# clinall = clinall[clinall$Patient %in% tmaf_kras$Patient,] # 4 received targeted treatment, 3 didn't, the others are NA's
+	load(file=paste0(OutDir, "../../Genomic_coMutations/gamAll.RData" ))
+	# tclin = tclin[tclin$egfr_class_consensus=="uncommon",]
+	tclin$targeted_treated = NA
+	tclin[rownames(clinall),"targeted_treated"] = clinall$treatment_targeted
+	tclin[ intersect(rownames(tclin),rownames(origimed_treatment) ) ,"targeted_treated"] = origimed_treatment[intersect(rownames(tclin),rownames(origimed_treatment) ),"treatment_targeted"]
+	tclin$kras_mutant = gamAll[rownames(tclin),"KRAS"]
+	tclin = tclin[(!is.na(tclin$kras_mutant)) & (!is.na(tclin$targeted_treated)), ]
+	tabb = dtable(tclin$kras_mutant,tclin$targeted_treated)
+	chisq.test(tabb) # p-val = 1
+}
+
+
+
+
+
+
+
+
+
 
 
 
