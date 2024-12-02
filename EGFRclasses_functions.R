@@ -5195,14 +5195,17 @@ assign_egfri_generation = function( drug ){
 	return(assigned_class)
 }
 
-regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
+regimen_associations_FirstDrug_PatientLevel = function( OutDir, firstLine = FALSE, neo_or_adj = "any" ){
+
 	library(survival)
 	### Filling in Genie
 	load(file = paste0( OutDir,"../../Preprocessing/","Clin_Genie.RData" ))
+	load(file = paste0( OutDir,"../../Preprocessing/","Clin2_Genie_SampleLevel.RData" ))
 	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F)
-	colz = c("record_id","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
+	if (firstLine){ reg = reg[reg$regimen_number_within_cancer==1,] }
+	colz = c("record_id","ca_seq","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
 		"dx_drug_start_int_1","dx_drug_start_int_2","dx_drug_start_int_3","dx_drug_start_int_4","dx_drug_start_int_5","dx_drug_end_or_lastadm_int_1","dx_drug_end_or_lastadm_int_2","dx_drug_end_or_lastadm_int_3","dx_drug_end_or_lastadm_int_4","dx_drug_end_or_lastadm_int_5",
-		"os_d_status","tt_os_d1_days","tt_os_d2_days","tt_os_d3_days","tt_os_d4_days","tt_os_d5_days","os_g_status","tt_os_g_days","pfs_i_or_m_g_status","tt_pfs_i_or_m_g_days")
+		"os_d_status","tt_os_d1_days","tt_os_d2_days","tt_os_d3_days","tt_os_d4_days","tt_os_d5_days","os_g_status","tt_os_g_days","pfs_i_or_m_g_status","tt_pfs_i_or_m_g_days","ttnt_ca_seq_status","ttnt_ca_seq_days")
 	reg = reg[,colz]
 	reg = reg[reg$record_id %in% rownames(Clin),]
 	nn=unlist(strsplit(reg$regimen_drugs,split=", "))
@@ -5211,6 +5214,20 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		ass=c(ass,assign_drug_class(n))
 	}
 	dtable(ass)
+	# cancer diagnosis datasets - adding days from diagnosis to pathology sampling
+	seq = read.csv(paste0(DataDir,"genie_BPC_NSCLC/cancer_panel_test_level_dataset.csv"),stringsAsFactors=F)
+	seq = seq[seq$cpt_genie_sample_id %in% Clin2$Sample,]
+	seq = seq[seq$record_id %in% reg$record_id,]
+	# reg is at patient-level, seq is at sample X ca_seq level
+	# I will add all the dx_path_proc_cpt_days available. 
+	reg$dx_path_proc_cpt_days = ""
+	reg$Sample = NA
+	for (rn in rownames(reg)){
+		reg[rn,"dx_path_proc_cpt_days"] = paste(seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"dx_path_proc_cpt_days"],collapse=',')
+		reg[rn,"Sample"] = seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"cpt_genie_sample_id"][1] # just to see whether the sample is profiled
+	}
+	reg = reg[!is.na(reg$Sample),]
+
 	# Classify drug
 	for (drug_id in c(1:5)){
 		for (rn in rownames(reg)){
@@ -5270,16 +5287,25 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		reg$earlier_os = NA
 		reg$earlier_pfs = NA
 		reg$earlier_tut = NA
+		reg$neo_or_adj = NA
 		for (rn in rownames(reg)){
-			i = 1
-			while ((is.na(reg[rn,"earlier"])) & (i<=5) ){
-				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					reg[rn,"earlier"] = reg[rn,paste0("drugs_drug_",i)]
-					reg[rn,"earlier_os"] = reg[rn,paste0("tt_os_d",i,"_days")]
-					reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
-					reg[rn,"earlier_tut"] = reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)]
-				}
-				i=i+1
+			all_drugs = as.character(reg[rn,paste0("drugs_drug_",c(1:5))])
+			all_classes = as.character(reg[rn,paste0("class_drug_",c(1:5))])
+			if (!(any((all_classes==this_treatmentclass) %in% c(T)))) { next }
+			all_os = as.numeric(reg[rn,paste0("tt_os_d",c(1:5),"_days")])
+			all_tut = as.numeric(reg[rn,paste0("dx_drug_end_or_lastadm_int_",c(1:5))])-as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			all_starts = as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			class_min = min(all_starts[((all_classes==this_treatmentclass) %in% c(T))])
+			index = which(((all_starts==class_min) %in% c(T)) & ( (all_classes==this_treatmentclass) %in% c(T) ) )[1]
+			reg[rn,"earlier"] = all_drugs[index]
+			reg[rn,"earlier_os"] = all_os[index]
+			reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
+			reg[rn,"earlier_tut"] = all_tut[index]
+			if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+				reg[rn,"neo_or_adj"] = "unclear"
+			} else {
+				sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+				reg[rn,"neo_or_adj"] = ifelse( all(sampling_days_from_diagnosis<class_min),"adjuvant",ifelse( all(sampling_days_from_diagnosis>class_min),"neoadjuvant","unclear" ) )
 			}
 		}
 		reg$Patient = reg$record_id	
@@ -5292,8 +5318,12 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		this_Clin = reg[!is.na(reg$earlier),]
 		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
 		this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
 		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
 		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
 		# OS
 		this_Clin$Times = as.numeric(this_Clin$earlier_os)
 		this_Clin$vital_status_num = as.numeric(this_Clin$os_d_status)
@@ -5332,13 +5362,18 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
 		this_Clin$Times = as.numeric(this_Clin$earlier_os)
 		this_Clin[this_Clin$drugs_dc_ynu=="Yes","Times"] = as.numeric(this_Clin[this_Clin$drugs_dc_ynu=="Yes","earlier_tut"])
+
 		this_Clin$vital_status_num = 0
 		this_Clin[this_Clin$drugs_dc_ynu=="Yes","vital_status_num"] = 1
 		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
+
 		this_Clin$egfr_class_consensus = factor(this_Clin$egfr_class_consensus,levels=ordered_classes)
 		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,".pdf")
-		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
-		
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment (days)", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,"_log10.pdf")
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, log10(this_Clin$Times+1), xlab = "", ylab = "Time Under Treatment (log10(days+1))", signifTest = "kruskal", labelycoo = max(log10(this_Clin$Times+1)), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+
+
 		print(aggregate(Times~egfr_class_consensus,data=this_Clin,FUN='median'))
 
 		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
@@ -5395,16 +5430,25 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		reg$earlier_os = NA
 		reg$earlier_pfs = NA
 		reg$earlier_tut = NA
+		reg$neo_or_adj = NA
 		for (rn in rownames(reg)){
-			i = 1
-			while ((is.na(reg[rn,"earlier"])) & (i<=5) ){
-				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					reg[rn,"earlier"] = reg[rn,paste0("drugs_drug_",i)]
-					reg[rn,"earlier_os"] = reg[rn,paste0("tt_os_d",i,"_days")]
-					reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
-					reg[rn,"earlier_tut"] = reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)]
-				}
-				i=i+1
+			all_drugs = as.character(reg[rn,paste0("drugs_drug_",c(1:5))])
+			all_classes = as.character(reg[rn,paste0("class_drug_",c(1:5))])
+			if (!(any((all_classes==this_treatmentclass) %in% c(T)))) { next }
+			all_os = as.numeric(reg[rn,paste0("tt_os_d",c(1:5),"_days")])
+			all_tut = as.numeric(reg[rn,paste0("dx_drug_end_or_lastadm_int_",c(1:5))])-as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			all_starts = as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			class_min = min(all_starts[((all_classes==this_treatmentclass) %in% c(T))])
+			index = which(((all_starts==class_min) %in% c(T)) & ( (all_classes==this_treatmentclass) %in% c(T) ) )[1]
+			reg[rn,"earlier"] = all_drugs[index]
+			reg[rn,"earlier_os"] = all_os[index]
+			reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
+			reg[rn,"earlier_tut"] = all_tut[index]
+			if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+				reg[rn,"neo_or_adj"] = "unclear"
+			} else {
+				sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+				reg[rn,"neo_or_adj"] = ifelse( all(sampling_days_from_diagnosis<class_min),"adjuvant",ifelse( all(sampling_days_from_diagnosis>class_min),"neoadjuvant","unclear" ) )
 			}
 		}
 		reg$Patient = reg$record_id	
@@ -5415,8 +5459,12 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		this_Clin = reg[!is.na(reg$earlier),]
 		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
 		this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
 		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
 		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
 		# OS
 		this_Clin$Times = as.numeric(this_Clin$earlier_os)
 		this_Clin$vital_status_num = as.numeric(this_Clin$os_d_status)
@@ -5451,6 +5499,339 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 		coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class + Stage")), data = Surv_df) #  Age + Sex +
 	   	a = (summary(coxr))
 	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_PFS_CoxRegression_CorrectingStage.txt"))
+		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
+		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
+		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
+		this_Clin$Times = as.numeric(this_Clin$earlier_os)
+		this_Clin[this_Clin$drugs_dc_ynu=="Yes","Times"] = as.numeric(this_Clin[this_Clin$drugs_dc_ynu=="Yes","earlier_tut"])
+		this_Clin$vital_status_num = 0
+		this_Clin[this_Clin$drugs_dc_ynu=="Yes","vital_status_num"] = 1
+		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
+		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage,Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
+		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
+		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
+		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
+		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
+		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
+		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (months)", ylab = "Treatment continuation probability")
+		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
+		dev.off()
+		coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class + Stage + Age + Sex")), data = Surv_df) #  Age + Sex +
+	   	a = (summary(coxr))
+	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
+	   	for (feature in paste0("EGFR_class",theze)){
+	   		cox_MultiVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
+			cox_MultiVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
+			cox_MultiVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
+			cox_MultiVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
+	   	}
+	   	cox_MultiVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
+	   	cox_MultiVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class")), data = Surv_df) #  Age + Sex +
+	   	a = (summary(coxr))
+	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
+	   	for (feature in paste0("EGFR_class",theze)){
+	   		cox_UniVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
+			cox_UniVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
+			cox_UniVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
+			cox_UniVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
+	   	}
+	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
+	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
+	}
+	library(forestplot)
+	# clip = c(0.2,10)
+	# aesthetic formatting
+	cox_MultiVar_df["immuno","Regimen"] = "Immunotherapy"
+	cox_MultiVar_df["egfri","Regimen"] = "EGFR inhibitor\n(any)"
+	cox_MultiVar_df["egfri_1stGen","Regimen"] = "EGFR inhibitor\n(1st gen.)"
+	cox_MultiVar_df["egfri_2ndGen","Regimen"] = "EGFR inhibitor\n(2nd gen.)"
+	cox_MultiVar_df["egfri_3rdGen","Regimen"] = "EGFR inhibitor\n(3rd gen.)"
+
+	tabletext = cbind(
+	     c("Treatment", cox_MultiVar_df$Regimen),
+	     c("# of\npatients", cox_MultiVar_df$Npatients),
+	     c("HR\nuncommon", signif(cox_MultiVar_df$HR_EGFR_classuncommon,3)),
+	     c("p-value\nuncommon", formatC(signif(cox_MultiVar_df$pval_EGFR_classuncommon,2))),
+	     c("HR\ncompound", signif(cox_MultiVar_df$HR_EGFR_classcompound,3)),
+	     c("p-value\ncompound", formatC(signif(cox_MultiVar_df$pval_EGFR_classcompound,2))),
+	     rep("      ",length(c("Regimen", rownames(cox_MultiVar_df)))))
+	   pdf(paste0(OutDir,"cox_MultiVar_df_ForestPlot_AllRegimens.pdf"),5.5,(nrow(cox_MultiVar_df))/2, useDingbats=F,onefile=F,pointsize=6)
+	   fp=forestplot(tabletext, 
+	            legend = c("uncommon","compound"),
+	            align = c("l","l"),
+	            fn.ci_norm = c(fpDrawCircleCI,fpDrawCircleCI),
+	           hrzl_lines = gpar(col="#444444"),
+	           colgap = unit(2,"mm"),
+	            boxsize = 1.5*0.2,#cbind(c(NA,cox_MultiVar_df$Npatients/max(cox_MultiVar_df$Npatients))/4,c(NA,cox_MultiVar_df$Npatients/max(cox_MultiVar_df$Npatients))/4),
+	            mean = cbind(c(NA,cox_MultiVar_df$HR_EGFR_classuncommon),c(NA,cox_MultiVar_df$HR_EGFR_classcompound)), 
+	            lower = cbind(c(NA,cox_MultiVar_df$HR_lower95_EGFR_classuncommon),c(NA,cox_MultiVar_df$HR_lower95_EGFR_classcompound)), 
+	            upper = cbind(c(NA,cox_MultiVar_df$HR_upper95_EGFR_classuncommon),c(NA,cox_MultiVar_df$HR_upper95_EGFR_classcompound)),
+	           is.summary=c(TRUE,rep(FALSE,length(cox_MultiVar_df$Npatients))),
+	           xlog=T,
+	           xticks.digits = 1,
+	           xlab = "Hazard ratio",
+	           col=fpColors(box=c("tomato3","mediumpurple4"),line=c("tomato3","mediumpurple4")))
+	   print(fp)
+	   dev.off()
+
+	tabletext = cbind(
+	     c("Regimen", cox_UniVar_df$Regimen, "Summary"),
+	     c("# patients", cox_UniVar_df$Npatients, sum(cox_UniVar_df$Npatients)),
+	     c("HR\n(uncommon)", signif(cox_UniVar_df$HR_EGFR_classuncommon,3), signif(weighted.mean(x = cox_UniVar_df$HR_EGFR_classuncommon, w = cox_UniVar_df$Npatients),3)),
+	     c("p-value\n(uncommon)", formatC(signif(cox_UniVar_df$pval_EGFR_classuncommon,2)), NA),
+	     c("HR\n(compound)", signif(cox_UniVar_df$HR_EGFR_classcompound,3), signif(weighted.mean(x = cox_UniVar_df$HR_EGFR_classcompound, w = cox_UniVar_df$Npatients),3)),
+	     c("p-value\n(compound)", formatC(signif(cox_UniVar_df$pval_EGFR_classcompound,2)), NA),
+	     rep("      ",length(c("Regimen", rownames(cox_UniVar_df), "Summary"))))
+	   pdf(paste0(OutDir,"cox_UniVar_df_ForestPlot_AllRegimens.pdf"),8,nrow(cox_UniVar_df)/1.5, useDingbats=F,onefile=F,pointsize=6)
+	   fp=forestplot(tabletext, 
+	            legend = c("uncommon","compound"),
+	            align = c("l","l"),
+	            fn.ci_norm = c(fpDrawCircleCI,fpDrawCircleCI),
+	           hrzl_lines = gpar(col="#444444"),
+	           colgap = unit(5,"mm"),
+	            boxsize = 1.5*cbind(c(NA,cox_UniVar_df$Npatients/max(cox_UniVar_df$Npatients),NA)/4,c(NA,cox_UniVar_df$Npatients/max(cox_UniVar_df$Npatients),NA)/4),
+	            mean = cbind(c(NA,cox_UniVar_df$HR_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_EGFR_classcompound,NA)), 
+	            lower = cbind(c(NA,cox_UniVar_df$HR_lower95_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_lower95_EGFR_classcompound,NA)), 
+	            upper = cbind(c(NA,cox_UniVar_df$HR_upper95_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_upper95_EGFR_classcompound,NA)),
+	           is.summary=c(TRUE,rep(FALSE,length(cox_UniVar_df$Npatients)),TRUE),
+	           xlog=T,
+	           xticks.digits = 1,
+	           xlab = "Hazard ratio",
+	           col=fpColors(box=c("tomato3","mediumpurple4"),line=c("tomato3","mediumpurple4")))
+	   print(fp)
+	   dev.off()
+}
+
+regimen_associations_FirstDrug_RegimenLevel = function( OutDir, firstLine = FALSE, neo_or_adj = "any" ){
+	library(survival)
+	### Filling in Genie
+	load(file = paste0( OutDir,"../../Preprocessing/","Clin_Genie.RData" ))
+	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F)
+	if (firstLine){ reg = reg[reg$regimen_number_within_cancer==1,] }
+	colz = c("record_id","ca_seq","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
+		"dx_drug_start_int_1","dx_drug_start_int_2","dx_drug_start_int_3","dx_drug_start_int_4","dx_drug_start_int_5","dx_drug_end_or_lastadm_int_1","dx_drug_end_or_lastadm_int_2","dx_drug_end_or_lastadm_int_3","dx_drug_end_or_lastadm_int_4","dx_drug_end_or_lastadm_int_5",
+		"os_d_status","tt_os_d1_days","tt_os_d2_days","tt_os_d3_days","tt_os_d4_days","tt_os_d5_days","os_g_status","tt_os_g_days","pfs_i_or_m_g_status","tt_pfs_i_or_m_g_days")
+	reg = reg[,colz]
+	reg = reg[reg$record_id %in% rownames(Clin),]
+	nn=unlist(strsplit(reg$regimen_drugs,split=", "))
+	ass = c()
+	for (n in nn){
+		ass=c(ass,assign_drug_class(n))
+	}
+	dtable(ass)
+	# cancer diagnosis datasets - adding days from diagnosis to pathology sampling
+	seq = read.csv(paste0(DataDir,"genie_BPC_NSCLC/cancer_panel_test_level_dataset.csv"),stringsAsFactors=F)
+	seq = seq[seq$cpt_genie_sample_id %in% Clin2$Sample,]
+	seq = seq[seq$record_id %in% reg$record_id,]
+	# reg is at patient-level, seq is at sample X ca_seq level
+	# I will add all the dx_path_proc_cpt_days available. 
+	reg$dx_path_proc_cpt_days = ""
+	reg$Sample = NA
+	for (rn in rownames(reg)){
+		reg[rn,"dx_path_proc_cpt_days"] = paste(seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"dx_path_proc_cpt_days"],collapse=',')
+		reg[rn,"Sample"] = seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"cpt_genie_sample_id"][1] # just to see whether the sample is profiled
+	}
+	reg = reg[!is.na(reg$Sample),]
+	# Classify drug
+	for (drug_id in c(1:5)){
+		for (rn in rownames(reg)){
+			reg[rn,paste0( "class_drug_",drug_id )] = ifelse((is.na(reg[rn,paste0( "drugs_drug_",drug_id )])),NA,assign_drug_class( reg[rn,paste0( "drugs_drug_",drug_id )] ))
+		}
+	}
+	dtable(c(reg$class_drug_1,reg$class_drug_2,reg$class_drug_3,reg$class_drug_4,reg$class_drug_5) ) # UTTERLY PERFECT
+	# barplots
+	tc = Clin[(Clin$Patient %in% reg$record_id),]
+	for (p in rownames(tc)){
+		regp = reg[(reg$record_id==p),]
+		all_drugs_classes = sort(unique(c(regp$class_drug_1,regp$class_drug_2,regp$class_drug_3,regp$class_drug_4,regp$class_drug_5)))
+		all_drugs_classes = all_drugs_classes[!(all_drugs_classes=="others_unclear")]
+		all_drugs_classes = paste(all_drugs_classes,collapse=",")
+		tc[p,"all_drugs_classes"] = all_drugs_classes
+	}
+	tc = tc[grepl("egfri",tc$all_drugs_classes ),]
+	for (p in rownames(tc)){
+		regp = reg[(reg$record_id==p),]
+		all_drugs_egfri = unlist(strsplit(sort(unlist(regp$regimen_drugs)),split=", " ))
+		all_drugs_egfri = unique(sort(all_drugs_egfri[all_drugs_egfri %in% c( "Afatinib Dimaleate","Erlotinib Hydrochloride","Gefitinib","Osimertinib","Rociletinib" )]))
+		all_drugs_egfri = sub(" .*", "", all_drugs_egfri)
+		all_drugs_egfri = paste(all_drugs_egfri,collapse=",")
+		tc[p,"all_drugs_egfri"] = all_drugs_egfri
+	}
+	tabz = dtable(tc$all_drugs_egfri,tc$egfr_class_consensus)
+	keepz = names(which(rowSums(tabz>5)>0))
+	tc[!(tc$all_drugs_egfri %in% keepz),"all_drugs_egfri" ] = "other_combinations"
+	tabb = t(dtable(tc$all_drugs_egfri,tc$egfr_class_consensus))
+	ch = chisq.test(tabb)$p.value
+	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
+	mt = melt(tabb)
+	colnames(mt) = c( "EGFR_class","EGFRi_combination","Percentage" )
+	mt$TotalPatients = NA
+	mt[(mt$EGFR_class=="common") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="common"))
+	mt[(mt$EGFR_class=="uncommon") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="uncommon"))
+	mt[(mt$EGFR_class=="compound") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="compound"))
+	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
+	pa = ggplot(data=mt, aes(x=EGFR_class, y=Percentage, fill=EGFRi_combination)) +
+	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("EGFRi combination vs EGFR class\n","Chi-square test, p = ",signif(ch,2)) ) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
+	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2)
+	pdf(paste0(OutDir,"EGFRclasses_EGFRicombination_Genie.pdf"),6,5,onefile=FALSE)
+	print(pa)
+	dev.off()
+
+	theze = c( "uncommon","compound" )
+	cox_MultiVar_df = dan.df( c("chemo","egfri","immuno","egfri_1stGen","egfri_2ndGen","egfri_3rdGen"),c( "Regimen","Npatients",paste0("HR_",theze), paste0("HR_lower95_",theze), paste0("HR_upper95_",theze),paste0("pval_",theze) ) )
+	cox_UniVar_df = dan.df( c("chemo","egfri","immuno","egfri_1stGen","egfri_2ndGen","egfri_3rdGen"),c( "Regimen","Npatients",paste0("HR_",theze), paste0("HR_lower95_",theze), paste0("HR_upper95_",theze),paste0("pval_",theze) ) )
+
+	for (this_treatmentclass in c( "chemo","egfri","immuno" ) ){ # anti_angio
+		this_treatmentclass_alias = this_treatmentclass
+		if (this_treatmentclass=="immuno") { this_treatmentclass_alias="immunotherapy" }
+		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
+		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
+		dcat( this_treatmentclass )
+		reg$earlier = NA
+		reg$earlier_os = NA
+		reg$earlier_pfs = NA
+		reg$earlier_tut = NA
+		reg$neo_or_adj = NA
+		for (rn in rownames(reg)){
+			all_drugs = as.character(reg[rn,paste0("drugs_drug_",c(1:5))])
+			all_classes = as.character(reg[rn,paste0("class_drug_",c(1:5))])
+			if (!(any((all_classes==this_treatmentclass) %in% c(T)))) { next }
+			all_os = as.numeric(reg[rn,paste0("tt_os_d",c(1:5),"_days")])
+			all_tut = as.numeric(reg[rn,paste0("dx_drug_end_or_lastadm_int_",c(1:5))])-as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			all_starts = as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			class_min = min(all_starts[((all_classes==this_treatmentclass) %in% c(T))])
+			index = which(((all_starts==class_min) %in% c(T)) & ( (all_classes==this_treatmentclass) %in% c(T) ) )[1]
+			reg[rn,"earlier"] = all_drugs[index]
+			reg[rn,"earlier_os"] = all_os[index]
+			reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
+			reg[rn,"earlier_tut"] = all_tut[index]
+			if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+				reg[rn,"neo_or_adj"] = "unclear"
+			} else {
+				sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+				reg[rn,"neo_or_adj"] = ifelse( all(sampling_days_from_diagnosis<class_min),"adjuvant",ifelse( all(sampling_days_from_diagnosis>class_min),"neoadjuvant","unclear" ) )
+			}
+		}
+		reg$Patient = reg$record_id	
+		for (rn in rownames(reg)){
+			reg[rn,"egfr_class_consensus"] = Clin[reg[rn,"Patient"],"egfr_class_consensus"]
+			reg[rn,"Stage"] = Clin[reg[rn,"Patient"],"Stage"]
+			reg[rn,"Sex"] = Clin[reg[rn,"Patient"],"Sex"]
+			reg[rn,"Age"] = Clin[reg[rn,"Patient"],"Age"]
+		}
+		this_Clin = reg[!is.na(reg$earlier),]
+		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
+		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
+		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
+		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
+		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
+		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
+		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
+		this_Clin$Times = as.numeric(this_Clin$earlier_os)
+		this_Clin[this_Clin$drugs_dc_ynu=="Yes","Times"] = as.numeric(this_Clin[this_Clin$drugs_dc_ynu=="Yes","earlier_tut"])
+		this_Clin$vital_status_num = 0
+		this_Clin[this_Clin$drugs_dc_ynu=="Yes","vital_status_num"] = 1
+		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
+		this_Clin$egfr_class_consensus = factor(this_Clin$egfr_class_consensus,levels=ordered_classes)
+		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,".pdf")
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment (days)", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,"_log10.pdf")
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, log10(this_Clin$Times+1), xlab = "", ylab = "Time Under Treatment (log10(days+1))", signifTest = "kruskal", labelycoo = max(log10(this_Clin$Times+1)), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+
+		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
+		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
+		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
+		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
+		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
+		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
+		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
+		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
+		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
+		dev.off()
+		coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class + Stage + Age + Sex")), data = Surv_df) #  Age + Sex +
+	   	a = (summary(coxr))
+	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
+	   	for (feature in paste0("EGFR_class",theze)){
+	   		cox_MultiVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
+			cox_MultiVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
+			cox_MultiVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
+			cox_MultiVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
+	   	}
+	   	cox_MultiVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
+	   	cox_MultiVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class")), data = Surv_df) #  Age + Sex +
+	   	a = (summary(coxr))
+	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
+	   	for (feature in paste0("EGFR_class",theze)){
+	   		cox_UniVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
+			cox_UniVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
+			cox_UniVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
+			cox_UniVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
+	   	}
+	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
+	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
+	   	save(this_Clin,file = paste0(OutDir,"this_Clin_",this_treatmentclass,".RData"))
+	}
+
+	# Classify egfri generation
+	for (drug_id in c(1:5)){
+		for (rn in rownames(reg)){
+			reg[rn,paste0( "class_drug_",drug_id )] = ifelse((is.na(reg[rn,paste0( "drugs_drug_",drug_id )])),NA,assign_egfri_generation( reg[rn,paste0( "drugs_drug_",drug_id )] ))
+		}
+	}
+	reg = reg[!is.na(reg$class_drug_1),]
+
+	for (this_treatmentclass in c( "egfri_1stGen","egfri_2ndGen","egfri_3rdGen" ) ){
+		if (this_treatmentclass=="egfri_1stGen"){ this_treatmentclass_alias = "EGFR inhibitor (1st gen.)" }
+		if (this_treatmentclass=="egfri_2ndGen"){ this_treatmentclass_alias = "EGFR inhibitor (2nd gen.)" }
+		if (this_treatmentclass=="egfri_3rdGen"){ this_treatmentclass_alias = "EGFR inhibitor (3rd gen.)" }
+		dcat( this_treatmentclass )
+		reg$earlier = NA
+		reg$earlier_os = NA
+		reg$earlier_pfs = NA
+		reg$earlier_tut = NA
+		reg$neo_or_adj = NA
+		for (rn in rownames(reg)){
+			all_drugs = as.character(reg[rn,paste0("drugs_drug_",c(1:5))])
+			all_classes = as.character(reg[rn,paste0("class_drug_",c(1:5))])
+			if (!(any((all_classes==this_treatmentclass) %in% c(T)))) { next }
+			all_os = as.numeric(reg[rn,paste0("tt_os_d",c(1:5),"_days")])
+			all_tut = as.numeric(reg[rn,paste0("dx_drug_end_or_lastadm_int_",c(1:5))])-as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			all_starts = as.numeric(reg[rn,paste0("dx_drug_start_int_",c(1:5) )])
+			class_min = min(all_starts[((all_classes==this_treatmentclass) %in% c(T))])
+			index = which(((all_starts==class_min) %in% c(T)) & ( (all_classes==this_treatmentclass) %in% c(T) ) )[1]
+			reg[rn,"earlier"] = all_drugs[index]
+			reg[rn,"earlier_os"] = all_os[index]
+			reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
+			reg[rn,"earlier_tut"] = all_tut[index]
+			if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+				reg[rn,"neo_or_adj"] = "unclear"
+			} else {
+				sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+				reg[rn,"neo_or_adj"] = ifelse( all(sampling_days_from_diagnosis<class_min),"adjuvant",ifelse( all(sampling_days_from_diagnosis>class_min),"neoadjuvant","unclear" ) )
+			}
+		}
+		reg$Patient = reg$record_id	
+		for (rn in rownames(reg)){
+			reg[rn,"egfr_class_consensus"] = Clin[reg[rn,"Patient"],"egfr_class_consensus"]
+			reg[rn,"Stage"] = Clin[reg[rn,"Patient"],"Stage"]
+		}
+		this_Clin = reg[!is.na(reg$earlier),]
+		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
+		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
+		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
+		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
 		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
 		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
 		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
@@ -5549,12 +5930,13 @@ regimen_associations_FirstDrug_PatientLevel = function( OutDir ){
 	   dev.off()
 }
 
-regimen_associations_FirstDrug_RegimenLevel = function( OutDir ){
+regimen_associations_SingleDrugLevel = function( OutDir, firstLine = FALSE, neo_or_adj = "any" ){
 	library(survival)
 	### Filling in Genie
 	load(file = paste0( OutDir,"../../Preprocessing/","Clin_Genie.RData" ))
 	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F)
-	colz = c("record_id","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
+	if (firstLine){ reg = reg[reg$regimen_number_within_cancer==1,] }
+	colz = c("record_id","ca_seq","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
 		"dx_drug_start_int_1","dx_drug_start_int_2","dx_drug_start_int_3","dx_drug_start_int_4","dx_drug_start_int_5","dx_drug_end_or_lastadm_int_1","dx_drug_end_or_lastadm_int_2","dx_drug_end_or_lastadm_int_3","dx_drug_end_or_lastadm_int_4","dx_drug_end_or_lastadm_int_5",
 		"os_d_status","tt_os_d1_days","tt_os_d2_days","tt_os_d3_days","tt_os_d4_days","tt_os_d5_days","os_g_status","tt_os_g_days","pfs_i_or_m_g_status","tt_pfs_i_or_m_g_days")
 	reg = reg[,colz]
@@ -5565,6 +5947,19 @@ regimen_associations_FirstDrug_RegimenLevel = function( OutDir ){
 		ass=c(ass,assign_drug_class(n))
 	}
 	dtable(ass)
+	# cancer diagnosis datasets - adding days from diagnosis to pathology sampling
+	seq = read.csv(paste0(DataDir,"genie_BPC_NSCLC/cancer_panel_test_level_dataset.csv"),stringsAsFactors=F)
+	seq = seq[seq$cpt_genie_sample_id %in% Clin2$Sample,]
+	seq = seq[seq$record_id %in% reg$record_id,]
+	# reg is at patient-level, seq is at sample X ca_seq level
+	# I will add all the dx_path_proc_cpt_days available. 
+	reg$dx_path_proc_cpt_days = ""
+	reg$Sample = NA
+	for (rn in rownames(reg)){
+		reg[rn,"dx_path_proc_cpt_days"] = paste(seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"dx_path_proc_cpt_days"],collapse=',')
+		reg[rn,"Sample"] = seq[(seq$record_id==reg[rn,"record_id"]) & (seq$ca_seq==reg[rn,"ca_seq"]),"cpt_genie_sample_id"][1] # just to see whether the sample is profiled
+	}
+	reg = reg[!is.na(reg$Sample),]
 	# Classify drug
 	for (drug_id in c(1:5)){
 		for (rn in rownames(reg)){
@@ -5620,297 +6015,19 @@ regimen_associations_FirstDrug_RegimenLevel = function( OutDir ){
 		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
 		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
 		dcat( this_treatmentclass )
-		reg$earlier = NA
-		reg$earlier_os = NA
-		reg$earlier_pfs = NA
-		reg$earlier_tut = NA
-		for (rn in rownames(reg)){
-			i = 1
-			while ((is.na(reg[rn,"earlier"])) & (i<=5) ){
-				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					reg[rn,"earlier"] = reg[rn,paste0("drugs_drug_",i)]
-					reg[rn,"earlier_os"] = reg[rn,paste0("tt_os_d",i,"_days")]
-					reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
-					reg[rn,"earlier_tut"] = reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)]
-				}
-				i=i+1
-			}
-		}
-		reg$Patient = reg$record_id	
-		for (rn in rownames(reg)){
-			reg[rn,"egfr_class_consensus"] = Clin[reg[rn,"Patient"],"egfr_class_consensus"]
-			reg[rn,"Stage"] = Clin[reg[rn,"Patient"],"Stage"]
-			reg[rn,"Sex"] = Clin[reg[rn,"Patient"],"Sex"]
-			reg[rn,"Age"] = Clin[reg[rn,"Patient"],"Age"]
-		}
-		this_Clin = reg[!is.na(reg$earlier),]
-		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
-		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
-		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
-		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
-		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
-		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
-		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
-		this_Clin$Times = as.numeric(this_Clin$earlier_os)
-		this_Clin[this_Clin$drugs_dc_ynu=="Yes","Times"] = as.numeric(this_Clin[this_Clin$drugs_dc_ynu=="Yes","earlier_tut"])
-		this_Clin$vital_status_num = 0
-		this_Clin[this_Clin$drugs_dc_ynu=="Yes","vital_status_num"] = 1
-		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
-		this_Clin$egfr_class_consensus = factor(this_Clin$egfr_class_consensus,levels=ordered_classes)
-		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,".pdf")
-		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
-
-		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
-		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
-		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
-		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
-		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
-		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
-		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
-		pdf(fileName,2.8,2.8,useDingbats=F)
-		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
-		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
-		dev.off()
-		coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class + Stage + Age + Sex")), data = Surv_df) #  Age + Sex +
-	   	a = (summary(coxr))
-	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
-	   	for (feature in paste0("EGFR_class",theze)){
-	   		cox_MultiVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
-			cox_MultiVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
-			cox_MultiVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
-			cox_MultiVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
-	   	}
-	   	cox_MultiVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
-	   	cox_MultiVar_df[this_treatmentclass,"Npatients"] = a$n
-	   	coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class")), data = Surv_df) #  Age + Sex +
-	   	a = (summary(coxr))
-	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
-	   	for (feature in paste0("EGFR_class",theze)){
-	   		cox_UniVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
-			cox_UniVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
-			cox_UniVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
-			cox_UniVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
-	   	}
-	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
-	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
-	   	save(this_Clin,file = paste0(OutDir,"this_Clin_",this_treatmentclass,".RData"))
-	}
-
-	# Classify egfri generation
-	for (drug_id in c(1:5)){
-		for (rn in rownames(reg)){
-			reg[rn,paste0( "class_drug_",drug_id )] = ifelse((is.na(reg[rn,paste0( "drugs_drug_",drug_id )])),NA,assign_egfri_generation( reg[rn,paste0( "drugs_drug_",drug_id )] ))
-		}
-	}
-	reg = reg[!is.na(reg$class_drug_1),]
-
-	for (this_treatmentclass in c( "egfri_1stGen","egfri_2ndGen","egfri_3rdGen" ) ){
-		if (this_treatmentclass=="egfri_1stGen"){ this_treatmentclass_alias = "EGFR inhibitor (1st gen.)" }
-		if (this_treatmentclass=="egfri_2ndGen"){ this_treatmentclass_alias = "EGFR inhibitor (2nd gen.)" }
-		if (this_treatmentclass=="egfri_3rdGen"){ this_treatmentclass_alias = "EGFR inhibitor (3rd gen.)" }
-		dcat( this_treatmentclass )
-		reg$earlier = NA
-		reg$earlier_os = NA
-		reg$earlier_pfs = NA
-		reg$earlier_tut = NA
-		for (rn in rownames(reg)){
-			i = 1
-			while ((is.na(reg[rn,"earlier"])) & (i<=5) ){
-				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					reg[rn,"earlier"] = reg[rn,paste0("drugs_drug_",i)]
-					reg[rn,"earlier_os"] = reg[rn,paste0("tt_os_d",i,"_days")]
-					reg[rn,"earlier_pfs"] = reg[rn,paste0("tt_pfs_i_or_m_g_days")]
-					reg[rn,"earlier_tut"] = reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)]
-				}
-				i=i+1
-			}
-		}
-		reg$Patient = reg$record_id	
-		for (rn in rownames(reg)){
-			reg[rn,"egfr_class_consensus"] = Clin[reg[rn,"Patient"],"egfr_class_consensus"]
-			reg[rn,"Stage"] = Clin[reg[rn,"Patient"],"Stage"]
-		}
-		this_Clin = reg[!is.na(reg$earlier),]
-		this_Clin = this_Clin[order(this_Clin$Patient,this_Clin$regimen_number_within_cancer),]
-		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
-		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
-		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
-		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
-		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
-		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
-		this_Clin$Times = as.numeric(this_Clin$earlier_os)
-		this_Clin[this_Clin$drugs_dc_ynu=="Yes","Times"] = as.numeric(this_Clin[this_Clin$drugs_dc_ynu=="Yes","earlier_tut"])
-		this_Clin$vital_status_num = 0
-		this_Clin[this_Clin$drugs_dc_ynu=="Yes","vital_status_num"] = 1
-		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
-		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage,Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, RegimenNumber = this_Clin$regimen_number_within_cancer, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
-		Surv_df$SurvObj = with(Surv_df, Surv(Times, as.numeric(as.character(vital_status))))
-		km_gs = survfit(SurvObj~EGFR_class, data = Surv_df)
-		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
-		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
-		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
-		pdf(fileName,2.8,2.8,useDingbats=F)
-		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (months)", ylab = "Treatment continuation probability")
-		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
-		dev.off()
-		coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class + Stage + Age + Sex")), data = Surv_df) #  Age + Sex +
-	   	a = (summary(coxr))
-	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
-	   	for (feature in paste0("EGFR_class",theze)){
-	   		cox_MultiVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
-			cox_MultiVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
-			cox_MultiVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
-			cox_MultiVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
-	   	}
-	   	cox_MultiVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
-	   	cox_MultiVar_df[this_treatmentclass,"Npatients"] = a$n
-	   	coxr = coxph(as.formula(paste0("SurvObj ~ EGFR_class")), data = Surv_df) #  Age + Sex +
-	   	a = (summary(coxr))
-	   	capture.output(a, file = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment_CoxRegression_CorrectingStage.txt"))
-	   	for (feature in paste0("EGFR_class",theze)){
-	   		cox_UniVar_df[this_treatmentclass,paste0("HR_",feature)] = a$coefficients[feature,"exp(coef)"]
-			cox_UniVar_df[this_treatmentclass,paste0("HR_lower95_",feature)] = a$conf.int[feature,"lower .95"]
-			cox_UniVar_df[this_treatmentclass,paste0("HR_upper95_",feature)] = a$conf.int[feature,"upper .95"]
-			cox_UniVar_df[this_treatmentclass,paste0("pval_",feature)] = a$coefficients[feature,"Pr(>|z|)"]
-	   	}
-	   	cox_UniVar_df[this_treatmentclass,"Regimen"] = this_treatmentclass_alias
-	   	cox_UniVar_df[this_treatmentclass,"Npatients"] = a$n
-	}
-	library(forestplot)
-	# clip = c(0.2,10)
-	tabletext = cbind(
-	     c("Regimen", cox_MultiVar_df$Regimen, "Summary"),
-	     c("# patients", cox_MultiVar_df$Npatients, sum(cox_MultiVar_df$Npatients)),
-	     c("HR\n(uncommon)", signif(cox_MultiVar_df$HR_EGFR_classuncommon,3), signif(weighted.mean(x = cox_MultiVar_df$HR_EGFR_classuncommon, w = cox_MultiVar_df$Npatients),3)),
-	     c("p-value\n(uncommon)", formatC(signif(cox_MultiVar_df$pval_EGFR_classuncommon,2)), NA),
-	     c("HR\n(compound)", signif(cox_MultiVar_df$HR_EGFR_classcompound,3), signif(weighted.mean(x = cox_MultiVar_df$HR_EGFR_classcompound, w = cox_MultiVar_df$Npatients),3)),
-	     c("p-value\n(compound)", formatC(signif(cox_MultiVar_df$pval_EGFR_classcompound,2)), NA),
-	     rep("      ",length(c("Regimen", rownames(cox_MultiVar_df), "Summary"))))
-	   pdf(paste0(OutDir,"cox_MultiVar_df_ForestPlot_AllRegimens.pdf"),6,nrow(cox_MultiVar_df)/2, useDingbats=F,onefile=F)
-	   fp=forestplot(tabletext, 
-	            legend = c("uncommon","compound"),
-	            align = c("l","l"),
-	            fn.ci_norm = c(fpDrawCircleCI,fpDrawCircleCI),
-	           hrzl_lines = gpar(col="#444444"),
-	           colgap = unit(5,"mm"),
-	            boxsize = 1.5*cbind(c(NA,cox_MultiVar_df$Npatients/max(cox_MultiVar_df$Npatients),NA)/4,c(NA,cox_MultiVar_df$Npatients/max(cox_MultiVar_df$Npatients),NA)/4),
-	            mean = cbind(c(NA,cox_MultiVar_df$HR_EGFR_classuncommon,NA),c(NA,cox_MultiVar_df$HR_EGFR_classcompound,NA)), 
-	            lower = cbind(c(NA,cox_MultiVar_df$HR_lower95_EGFR_classuncommon,NA),c(NA,cox_MultiVar_df$HR_lower95_EGFR_classcompound,NA)), 
-	            upper = cbind(c(NA,cox_MultiVar_df$HR_upper95_EGFR_classuncommon,NA),c(NA,cox_MultiVar_df$HR_upper95_EGFR_classcompound,NA)),
-	           is.summary=c(TRUE,rep(FALSE,length(cox_MultiVar_df$Npatients)),TRUE),
-	           xlog=T,
-	           # clip = clip,
-	           xlab = "Hazard ratio",
-	           col=fpColors(box=c("tomato3","mediumpurple4"),line=c("tomato3","mediumpurple4")))
-	   print(fp)
-	   dev.off()
-
-	tabletext = cbind(
-	     c("Regimen", cox_UniVar_df$Regimen, "Summary"),
-	     c("# patients", cox_UniVar_df$Npatients, sum(cox_UniVar_df$Npatients)),
-	     c("HR\n(uncommon)", signif(cox_UniVar_df$HR_EGFR_classuncommon,3), signif(weighted.mean(x = cox_UniVar_df$HR_EGFR_classuncommon, w = cox_UniVar_df$Npatients),3)),
-	     c("p-value\n(uncommon)", formatC(signif(cox_UniVar_df$pval_EGFR_classuncommon,2)), NA),
-	     c("HR\n(compound)", signif(cox_UniVar_df$HR_EGFR_classcompound,3), signif(weighted.mean(x = cox_UniVar_df$HR_EGFR_classcompound, w = cox_UniVar_df$Npatients),3)),
-	     c("p-value\n(compound)", formatC(signif(cox_UniVar_df$pval_EGFR_classcompound,2)), NA),
-	     rep("      ",length(c("Regimen", rownames(cox_UniVar_df), "Summary"))))
-	   pdf(paste0(OutDir,"cox_UniVar_df_ForestPlot_AllRegimens.pdf"),6,nrow(cox_UniVar_df)/2, useDingbats=F,onefile=F)
-	   fp=forestplot(tabletext, 
-	            legend = c("uncommon","compound"),
-	            align = c("l","l"),
-	            fn.ci_norm = c(fpDrawCircleCI,fpDrawCircleCI),
-	           hrzl_lines = gpar(col="#444444"),
-	           colgap = unit(5,"mm"),
-	            boxsize = 1.5*cbind(c(NA,cox_UniVar_df$Npatients/max(cox_UniVar_df$Npatients),NA)/4,c(NA,cox_UniVar_df$Npatients/max(cox_UniVar_df$Npatients),NA)/4),
-	            mean = cbind(c(NA,cox_UniVar_df$HR_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_EGFR_classcompound,NA)), 
-	            lower = cbind(c(NA,cox_UniVar_df$HR_lower95_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_lower95_EGFR_classcompound,NA)), 
-	            upper = cbind(c(NA,cox_UniVar_df$HR_upper95_EGFR_classuncommon,NA),c(NA,cox_UniVar_df$HR_upper95_EGFR_classcompound,NA)),
-	           is.summary=c(TRUE,rep(FALSE,length(cox_UniVar_df$Npatients)),TRUE),
-	           xlog=T,
-	           # clip = clip,
-	           xlab = "Hazard ratio",
-	           col=fpColors(box=c("tomato3","mediumpurple4"),line=c("tomato3","mediumpurple4")))
-	   print(fp)
-	   dev.off()
-}
-
-regimen_associations_SingleDrugLevel = function( OutDir ){
-	library(survival)
-	### Filling in Genie
-	load(file = paste0( OutDir,"../../Preprocessing/","Clin_Genie.RData" ))
-	reg = read.csv(paste0(DataDir,"genie_BPC_NSCLC/regimen_cancer_level_dataset.csv"),stringsAsFactors=F)
-	colz = c("record_id","regimen_number_within_cancer","drugs_dc_ynu","regimen_drugs","drugs_drug_1","drugs_drug_2","drugs_drug_3","drugs_drug_4","drugs_drug_5",
-		"dx_drug_start_int_1","dx_drug_start_int_2","dx_drug_start_int_3","dx_drug_start_int_4","dx_drug_start_int_5","dx_drug_end_or_lastadm_int_1","dx_drug_end_or_lastadm_int_2","dx_drug_end_or_lastadm_int_3","dx_drug_end_or_lastadm_int_4","dx_drug_end_or_lastadm_int_5",
-		"os_d_status","tt_os_d1_days","tt_os_d2_days","tt_os_d3_days","tt_os_d4_days","tt_os_d5_days","os_g_status","tt_os_g_days","pfs_i_or_m_g_status","tt_pfs_i_or_m_g_days")
-	reg = reg[,colz]
-	reg = reg[reg$record_id %in% rownames(Clin),]
-	nn=unlist(strsplit(reg$regimen_drugs,split=", "))
-	ass = c()
-	for (n in nn){
-		ass=c(ass,assign_drug_class(n))
-	}
-	dtable(ass)
-	# Classify drug
-	for (drug_id in c(1:5)){
-		for (rn in rownames(reg)){
-			reg[rn,paste0( "class_drug_",drug_id )] = ifelse((is.na(reg[rn,paste0( "drugs_drug_",drug_id )])),NA,assign_drug_class( reg[rn,paste0( "drugs_drug_",drug_id )] ))
-		}
-	}
-	dtable(c(reg$class_drug_1,reg$class_drug_2,reg$class_drug_3,reg$class_drug_4,reg$class_drug_5) ) # UTTERLY PERFECT
-	# barplots
-	tc = Clin[(Clin$Patient %in% reg$record_id),]
-	for (p in rownames(tc)){
-		regp = reg[(reg$record_id==p),]
-		all_drugs_classes = sort(unique(c(regp$class_drug_1,regp$class_drug_2,regp$class_drug_3,regp$class_drug_4,regp$class_drug_5)))
-		all_drugs_classes = all_drugs_classes[!(all_drugs_classes=="others_unclear")]
-		all_drugs_classes = paste(all_drugs_classes,collapse=",")
-		tc[p,"all_drugs_classes"] = all_drugs_classes
-	}
-	tc = tc[grepl("egfri",tc$all_drugs_classes ),]
-	for (p in rownames(tc)){
-		regp = reg[(reg$record_id==p),]
-		all_drugs_egfri = unlist(strsplit(sort(unlist(regp$regimen_drugs)),split=", " ))
-		all_drugs_egfri = unique(sort(all_drugs_egfri[all_drugs_egfri %in% c( "Afatinib Dimaleate","Erlotinib Hydrochloride","Gefitinib","Osimertinib","Rociletinib" )]))
-		all_drugs_egfri = sub(" .*", "", all_drugs_egfri)
-		all_drugs_egfri = paste(all_drugs_egfri,collapse=",")
-		tc[p,"all_drugs_egfri"] = all_drugs_egfri
-	}
-	tabz = dtable(tc$all_drugs_egfri,tc$egfr_class_consensus)
-	keepz = names(which(rowSums(tabz>5)>0))
-	tc[!(tc$all_drugs_egfri %in% keepz),"all_drugs_egfri" ] = "other_combinations"
-	tabb = t(dtable(tc$all_drugs_egfri,tc$egfr_class_consensus))
-	ch = chisq.test(tabb)$p.value
-	tabb = t(apply(tabb,1, function(x) x/sum(x)))*100
-	mt = melt(tabb)
-	colnames(mt) = c( "EGFR_class","EGFRi_combination","Percentage" )
-	mt$TotalPatients = NA
-	mt[(mt$EGFR_class=="common") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="common"))
-	mt[(mt$EGFR_class=="uncommon") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="uncommon"))
-	mt[(mt$EGFR_class=="compound") & (mt$EGFRi_combination=="Erlotinib"),"TotalPatients"] = paste0( "N = ",sum(tc$egfr_class_consensus=="compound"))
-	mt$EGFR_class = factor(mt$EGFR_class, levels=ordered_classes)
-	pa = ggplot(data=mt, aes(x=EGFR_class, y=Percentage, fill=EGFRi_combination)) +
-	  geom_bar(stat="identity", colour="black", linewidth = 0.1) + ylab("Percentage of patients") + xlab("") + ggtitle(paste0("EGFRi combination vs EGFR class\n","Chi-square test, p = ",signif(ch,2)) ) + theme_classic() + theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12)) +# scale_x_discrete(labels=rownames(ldf)) +
-	  geom_text(aes(label=TotalPatients,y=100),vjust=-0.2)
-	pdf(paste0(OutDir,"EGFRclasses_EGFRicombination_Genie.pdf"),6,5,onefile=FALSE)
-	print(pa)
-	dev.off()
-
-	theze = c( "uncommon","compound" )
-	cox_MultiVar_df = dan.df( c("chemo","egfri","immuno","egfri_1stGen","egfri_2ndGen","egfri_3rdGen"),c( "Regimen","Npatients",paste0("HR_",theze), paste0("HR_lower95_",theze), paste0("HR_upper95_",theze),paste0("pval_",theze) ) )
-	cox_UniVar_df = dan.df( c("chemo","egfri","immuno","egfri_1stGen","egfri_2ndGen","egfri_3rdGen"),c( "Regimen","Npatients",paste0("HR_",theze), paste0("HR_lower95_",theze), paste0("HR_upper95_",theze),paste0("pval_",theze) ) )
-
-	for (this_treatmentclass in c( "chemo","egfri","immuno" ) ){ # anti_angio
-		this_treatmentclass_alias = this_treatmentclass
-		if (this_treatmentclass=="immuno") { this_treatmentclass_alias="immunotherapy" }
-		if (this_treatmentclass=="egfri") { this_treatmentclass_alias="EGFR inhibitor (any)" }
-		if (this_treatmentclass=="chemo") { this_treatmentclass_alias="Chemotherapy" }
-		dcat( this_treatmentclass )
-		reg_expanded = dan.df(0,c("record_id","drugs_dc_ynu","earlier","earlier_os","earlier_tut" ))
+		reg_expanded = dan.df(0,c("record_id","drugs_dc_ynu","earlier","earlier_os","earlier_tut","neo_or_adj" ))
 		for (rn in rownames(reg)){
 			i = 1
 			while ((i<=5)){
 				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					thisreg = data.frame(record_id=reg[rn,"record_id"],drugs_dc_ynu=reg[rn,"drugs_dc_ynu"],earlier=reg[rn,paste0("drugs_drug_",i)],
-						earlier_os=reg[rn,paste0("tt_os_d",i,"_days")],earlier_tut=reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)],stringsAsFactors=F)
+					if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+						this_neo_or_adj = "unclear"
+					} else {
+						sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+						this_neo_or_adj = ifelse( all(sampling_days_from_diagnosis<reg[rn,paste0("dx_drug_start_int_",i)]),"adjuvant",ifelse( all(sampling_days_from_diagnosis>reg[rn,paste0("dx_drug_start_int_",i)]),"neoadjuvant","unclear2" ) )
+					}
+					thisreg = data.frame(record_id=reg[rn,"record_id"],drugs_dc_ynu=reg[rn,"drugs_dc_ynu"],earlier=reg[rn,paste0("drugs_drug_",i)],earlier_os=reg[rn,paste0("tt_os_d",i,"_days")],
+						earlier_tut=reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)],neo_or_adj=this_neo_or_adj,stringsAsFactors=F)
 					reg_expanded = rbind(reg_expanded,thisreg)
 				}
 				i=i+1
@@ -5925,8 +6042,12 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 		}
 		this_Clin = reg_expanded[!is.na(reg_expanded$earlier),]
 		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
 		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
 		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
 		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
 		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
 		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
@@ -5937,7 +6058,10 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 		this_Clin[this_Clin$os_d_status==1,"vital_status_num"] = 1
 		this_Clin$egfr_class_consensus = factor(this_Clin$egfr_class_consensus,levels=ordered_classes)
 		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,".pdf")
-		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, this_Clin$Times, xlab = "", ylab = "Time Under Treatment (days)", signifTest = "kruskal", labelycoo = max(this_Clin$Times), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+		fileName = paste0(OutDir,"tut_boxplots_",this_treatmentclass,"_log10.pdf")
+		dan.boxplots( fileName, this_Clin$egfr_class_consensus, log10(this_Clin$Times+1), xlab = "", ylab = "Time Under Treatment (log10(days+1))", signifTest = "kruskal", labelycoo = max(log10(this_Clin$Times+1)), xColors = colorz_classes, jitterColors = dan.expand_colors(this_Clin$egfr_class_consensus,ordered_classes,colorz_classes), labelJitteredPoints = NULL, jitterDotSize = 1.5, fileWidth = 3, fileHeight = 2.3, hlines_coo = NULL, hlines_labels = NULL )
+
 
 		Surv_df = data.frame(Patient = this_Clin$Patient, drugs_dc_ynu = this_Clin$drugs_dc_ynu, vital_status = as.numeric(this_Clin$vital_status_num), Times = this_Clin$Times, Stage = this_Clin$Stage, Sex = this_Clin$Sex, Age = this_Clin$Age, EGFR_class = factor(this_Clin$egfr_class_consensus,levels=ordered_classes) )
 		Surv_df = Surv_df[(Surv_df$drugs_dc_ynu) %in% c("Yes","No"),]
@@ -5946,7 +6070,7 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
 		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
 		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
-		pdf(fileName,5.3,5.3,useDingbats=F)
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
 		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (days)", ylab = "Treatment continuation probability")
 		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
 		dev.off()
@@ -5993,8 +6117,14 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 			i = 1
 			while ((i<=5)){
 				if ((reg[rn,paste0("class_drug_",i)]==this_treatmentclass) %in% c(T) ){
-					thisreg = data.frame(record_id=reg[rn,"record_id"],drugs_dc_ynu=reg[rn,"drugs_dc_ynu"],earlier=reg[rn,paste0("drugs_drug_",i)],
-						earlier_os=reg[rn,paste0("tt_os_d",i,"_days")],earlier_tut=reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)],stringsAsFactors=F)
+					if (nchar(reg[rn,"dx_path_proc_cpt_days"])==0){
+						this_neo_or_adj = "unclear"
+					} else {
+						sampling_days_from_diagnosis = as.numeric(unlist(strsplit(reg[rn,"dx_path_proc_cpt_days"],split=',')))
+						this_neo_or_adj = ifelse( all(sampling_days_from_diagnosis<reg[rn,paste0("dx_drug_start_int_",i)]),"adjuvant",ifelse( all(sampling_days_from_diagnosis>reg[rn,paste0("dx_drug_start_int_",i)]),"neoadjuvant","unclear" ) )
+					}
+					thisreg = data.frame(record_id=reg[rn,"record_id"],drugs_dc_ynu=reg[rn,"drugs_dc_ynu"],earlier=reg[rn,paste0("drugs_drug_",i)],earlier_os=reg[rn,paste0("tt_os_d",i,"_days")],
+						earlier_tut=reg[rn,paste0("dx_drug_end_or_lastadm_int_",i)]-reg[rn,paste0("dx_drug_start_int_",i)],neo_or_adj=this_neo_or_adj,stringsAsFactors=F)
 					reg_expanded = rbind(reg_expanded,thisreg)
 				}
 				i=i+1
@@ -6009,8 +6139,12 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 		}
 		this_Clin = reg_expanded[!is.na(reg_expanded$earlier),]
 		# this_Clin = this_Clin[!(duplicated(this_Clin$Patient)),]
+		if ( neo_or_adj=="only_adjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="adjuvant",] }
+		if ( neo_or_adj=="only_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj=="neoadjuvant",] }
+		if ( neo_or_adj=="non_neoadjuvant" ) { this_Clin = this_Clin[this_Clin$neo_or_adj!="neoadjuvant",] }
 		colorz_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"colorz"]
 		ordered_classes = clco[rownames(clco) %in% (this_Clin$egfr_class_consensus),"classes"]
+		if (length(ordered_classes)<2){ next }
 		# Time under treatment (TUT) - event if treatment is discontinued or patient dies
 		print(dtable(this_Clin$drugs_dc_ynu,is.na(this_Clin$earlier_tut)))
 		this_Clin = this_Clin[(this_Clin$drugs_dc_ynu) %in% c("Yes","No"),]
@@ -6025,7 +6159,7 @@ regimen_associations_SingleDrugLevel = function( OutDir ){
 		km_gs_dif = survdiff(SurvObj~EGFR_class, data = Surv_df, rho = 0)
 		p.val = 1 - pchisq(km_gs_dif$chisq, length(km_gs_dif$n) - 1)
 		fileName = paste0(OutDir, "SurvivalByClasses_OnlyTreatedWith_",this_treatmentclass,"_Genie_TimeUnderTreatment.pdf")
-		pdf(fileName,5.3,5.3,useDingbats=F)
+		pdf(fileName,2.8,2.8,useDingbats=F,pointsize=6)
 		plot(km_gs,mark.time=T, col=colorz_classes, main = paste0("Time Under Treatment with ",this_treatmentclass_alias," \nby EGFR class, Genie, p-val = ",signif(p.val,2)), xlab = "Time (months)", ylab = "Treatment continuation probability")
 		legend(x = "topright", legend = paste0(ordered_classes," (N=",as.numeric(dtable(Surv_df$EGFR_class)[ ordered_classes ]),")"), lty=c(1,1,1), col=colorz_classes)
 		dev.off()
@@ -6795,7 +6929,7 @@ krasmut_vs_treatment = function( OutDir ){
 	tclin$kras_mutant = gamAll[rownames(tclin),"KRAS"]
 	tclin = tclin[(!is.na(tclin$kras_mutant)) & (!is.na(tclin$targeted_treated)), ]
 	tabb = dtable(tclin$kras_mutant,tclin$targeted_treated)
-	chisq.test(tabb) # p-val = 1
+	fisher.test(tabb) # p-val = 1
 }
 
 

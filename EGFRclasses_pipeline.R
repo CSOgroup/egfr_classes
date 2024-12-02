@@ -69,15 +69,27 @@ tme_associations(OutDir)
 OutDir = paste0(MainDir,"Therapy/")
 dir.create(OutDir)
 therapy_associations( OutDir )
-OutDir = paste0(MainDir,"Therapy/Regimens_FirstDrug_PatientLevel/")
+
+# no filtering on first line, nor on adjuvant/neoadjuvant
+OutDir = paste0(MainDir,"Therapy/Regimens_FirstDrug_PatientLevel/") # one data point per tumor
 dir.create(OutDir)
 regimen_associations_FirstDrug_PatientLevel( OutDir )
-OutDir = paste0(MainDir,"Therapy/Regimens_FirstDrug_RegimenLevel/") # patients can be repeated
+OutDir = paste0(MainDir,"Therapy/Regimens_FirstDrug_RegimenLevel/") # one data point per regimen
 dir.create(OutDir)
 regimen_associations_FirstDrug_RegimenLevel( OutDir )
-OutDir = paste0(MainDir,"Therapy/Regimens_SingleDrugLevel/") # patients can be repeated
+OutDir = paste0(MainDir,"Therapy/Regimens_SingleDrugLevel/") # one data point per drug
 dir.create(OutDir)
 regimen_associations_SingleDrugLevel( OutDir )
+
+# only first line
+OutDir = paste0(MainDir,"Therapy/FirstLine_Regimens_FirstDrug_PatientLevel/")
+dir.create(OutDir)
+regimen_associations_FirstDrug_PatientLevel( OutDir, firstLine=T )
+
+# only adjuvant
+OutDir = paste0(MainDir,"Therapy/Adjuvant_Regimens_FirstDrug_PatientLevel/")
+dir.create(OutDir)
+regimen_associations_FirstDrug_PatientLevel( OutDir, neo_or_adj="only_adjuvant" )
 
 ### Step 8 - suppl tables for paper submission
 OutDir = paste0( MainDir,"Paper_SupplTables/" )
